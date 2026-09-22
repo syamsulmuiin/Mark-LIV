@@ -198,7 +198,7 @@ class MainActivity : AppCompatActivity() {
             p.contains("bluetooth") -> Settings.ACTION_BLUETOOTH_SETTINGS
             p.contains("wifi") || p.contains("wireless") -> Settings.ACTION_WIFI_SETTINGS
             p.contains("accessibility") -> Settings.ACTION_ACCESSIBILITY_SETTINGS
-            p.contains("notification") -> Settings.ACTION_NOTIFICATION_SETTINGS
+            p.contains("notification") -> "android.settings.NOTIFICATION_SETTINGS"
             p.contains("display") || p.contains("screen") -> Settings.ACTION_DISPLAY_SETTINGS
             p.contains("sound") || p.contains("audio") -> Settings.ACTION_SOUND_SETTINGS
             p.contains("location") -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
