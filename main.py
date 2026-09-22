@@ -240,7 +240,7 @@ def _describe_tools(declarations) -> str:
     return "\n".join(lines)
 
 
-def _describe_limits(has_vision: bool, has_mic: bool) -> str:
+def _describe_limits(has_vision: bool, has_mic: bool, has_device_mesh: bool = False) -> str:
     """The other half of self-knowledge: what is out of reach, and why.
 
     Derived from how the program is actually built, not from a list of refusals.
@@ -252,8 +252,7 @@ def _describe_limits(has_vision: bool, has_mic: bool) -> str:
         "- Anything not listed above is outside your reach. Say so in one clause "
         "and offer the nearest thing you can actually do — never mime an action "
         "you cannot take, and never report a result you did not get.",
-        "- You act on this machine only. You cannot reach the user's other "
-        "devices, accounts or hardware except through the tools listed above.",
+        ("- You can control this machine and trusted paired devices through the tools listed above." if has_device_mesh else "- You act on this machine only. You cannot reach the user's other devices, accounts or hardware except through the tools listed above."),
         "- You remember what is in the memory block and what has been said this "
         "session. Anything else you were told before is gone unless it was saved.",
     ]
@@ -323,6 +322,29 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 TOOL_DECLARATIONS = [
+    {
+        "name": "list_paired_devices",
+        "description": "List trusted paired devices, their online state and permitted capabilities. Use this when you need to choose a phone or other paired target.",
+        "parameters": {"type": "OBJECT", "properties": {}}
+    },
+    {
+        "name": "call_paired_device",
+        "description": (
+            "Control an online trusted paired device. For a request such as open phone settings, "
+            "first list paired devices when the target is not already unambiguous, then call the device. "
+            "Use only a capability reported for that device. Android supports android.settings.open, "
+            "app.launch, open_url, notification, vibration, clipboard.write and android.ui.* capabilities."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "device_id": {"type": "STRING", "description": "Target paired device id"},
+                "capability": {"type": "STRING", "description": "Capability exposed by that device"},
+                "args": {"type": "OBJECT", "description": "Capability arguments; use an empty object when none are required"}
+            },
+            "required": ["device_id", "capability"]
+        }
+    },
     # ── Inline tools ─────────────────────────────────────────────────────────
     # These stay here (rather than in an actions/*.py TOOL dict) because their
     # handling is woven into live-session state — vision capture/injection,
@@ -1023,6 +1045,7 @@ class JarvisLive:
             "limits": _describe_limits(
                 has_vision="screen_process" in _names,
                 has_mic=True,
+                has_device_mesh="call_paired_device" in _names,
             ),
         })
 
@@ -1737,6 +1760,12 @@ class JarvisLive:
                         self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
                 except Exception:
                     pass
+
+                if self._dashboard:
+                    try:
+                        await self._dashboard.send_device_audio(bytes(batch))
+                    except Exception:
+                        pass
 
                 try:
                     await asyncio.to_thread(stream.write, bytes(batch))

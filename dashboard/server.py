@@ -574,6 +574,17 @@ class DashboardServer:
                 dead.add(ws)
         self._clients -= dead
 
+    async def send_device_audio(self, pcm: bytes) -> None:
+        """Mirror JARVIS 24 kHz mono PCM output to connected trusted devices."""
+        dead = []
+        for device_id, ws in list(self._device_sockets.items()):
+            try:
+                await ws.send_bytes(pcm)
+            except Exception:
+                dead.append(device_id)
+        for device_id in dead:
+            self._device_sockets.pop(device_id, None)
+
     async def call_device(self, device_id: str, capability: str, args: dict | None = None, timeout: float = 30.0):
         """Invoke an explicitly permitted capability on a connected paired node."""
         if not self._mesh.authorized(device_id, capability):
@@ -787,7 +798,23 @@ class DashboardServer:
                 self._mesh.touch(device_id)
                 await websocket.send_json({"type": "ready", "capabilities": rec.get("capabilities", [])})
                 while True:
-                    msg = await websocket.receive_json()
+                    packet = await websocket.receive()
+                    if packet.get("type") == "websocket.disconnect":
+                        break
+                    audio = packet.get("bytes")
+                    if audio is not None:
+                        try:
+                            self._phone_audio_queue.put_nowait({"data": audio, "mime_type": "audio/pcm;rate=16000"})
+                        except asyncio.QueueFull:
+                            pass
+                        continue
+                    raw = packet.get("text")
+                    if not raw:
+                        continue
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        continue
                     if msg.get("type") == "jarvis.command":
                         if not self._mesh.authorized(device_id, "jarvis.command"):
                             await websocket.send_json({"type":"error","error":"capability denied"}); continue
