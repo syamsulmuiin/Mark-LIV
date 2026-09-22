@@ -1033,11 +1033,24 @@ class JarvisLive:
         # the host, the capability list from the registries that were just
         # discovered. Rename the assistant, add a plugin or move to another OS
         # and this follows without anyone editing a prompt.
-        _all_decls = (TOOL_DECLARATIONS
-                      + self._action_registry.get_tool_declarations()
-                      + self._plugin_registry.get_tool_declarations())
-        _names = {(d.get("name") if isinstance(d, dict) else getattr(d, "name", ""))
-                  for d in _all_decls}
+        # Build the Live tool list once per function name.  Gemini Live rejects
+        # the entire session when the same declaration is present twice (1007).
+        # Registries already guard normal name collisions, but deduplicating at
+        # the final API boundary also protects against a stale/third-party
+        # registry returning an inline declaration such as list_paired_devices.
+        _decl_candidates = (TOOL_DECLARATIONS
+                            + self._action_registry.get_tool_declarations()
+                            + self._plugin_registry.get_tool_declarations())
+        _all_decls = []
+        _decl_names = set()
+        for _decl in _decl_candidates:
+            _name = (_decl.get("name") if isinstance(_decl, dict)
+                     else getattr(_decl, "name", ""))
+            if not _name or _name in _decl_names:
+                continue
+            _decl_names.add(_name)
+            _all_decls.append(_decl)
+        _names = set(_decl_names)
         sys_prompt = _render_prompt(sys_prompt, {
             "assistant_name": self._asst_name,
             "platform": f"{_platform.system()} {_platform.release()}".strip(),
