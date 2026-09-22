@@ -2145,12 +2145,6 @@ class JarvisLive:
             self._dashboard.set_connect_callback(self._on_phone_connected)
             self._dashboard.set_interrupt_callback(self.interrupt)
             asyncio.create_task(self._dashboard.serve())
-            # Pairing is a core/device-mesh feature, not a Qt feature. Make a
-            # fresh offer available in CLI/background as soon as the transport starts.
-            if getattr(self.ui, "cli", False) or self.ui.__class__.__name__ == "HeadlessInterface":
-                offer = self._dashboard.new_pairing_offer()
-                self.ui.write_log(f"PAIR CODE: {offer['code']} (valid 10 minutes)")
-                self.ui.write_log(f"PAIR URL: {self._dashboard.get_pairing_url(offer)}")
             # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())
         except Exception as e:
@@ -2271,6 +2265,16 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
+                _err_lower = err_str.lower()
+                # Gemini Live sends GoAway when a finite live session reaches its
+                # duration limit. Treat that as a normal rollover and reconnect
+                # with the latest session-resumption handle instead of dumping a
+                # TaskGroup/1008 traceback.
+                if ("goaway" in _err_lower or "session durat" in _err_lower
+                        or ("1008" in _err_lower and "failed to close" in _err_lower)):
+                    print("[JARVIS] Live session duration reached — reconnecting.")
+                    self._conn_backoff = 0
+                    continue
                 print(f"[JARVIS] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
@@ -2358,64 +2362,135 @@ class JarvisLive:
             print(f"[JARVIS] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
 
+def _runtime_paths():
+    runtime = BASE_DIR / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    return runtime / "background.pid", runtime / "background.log"
+
+def _pid_alive(pid):
+    try:
+        if sys.platform == "win32":
+            r = _subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=5)
+            return str(pid) in r.stdout
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+def _background_pid():
+    pidfile, _ = _runtime_paths()
+    try:
+        pid = int(pidfile.read_text(encoding="utf-8").strip())
+        return pid if _pid_alive(pid) else None
+    except Exception:
+        return None
+
+def _start_background():
+    pidfile, logfile = _runtime_paths()
+    if (pid := _background_pid()):
+        print(f"JARVIS background is already running (PID {pid}).")
+        return
+    log = open(logfile, "a", encoding="utf-8", buffering=1)
+    kwargs = dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
+    if sys.platform == "win32":
+        kwargs["creationflags"] = _subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS | _subprocess.CREATE_NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+    p = _subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--background-worker"], **kwargs)
+    pidfile.write_text(str(p.pid), encoding="utf-8")
+    print(f"JARVIS background started (PID {p.pid}). Terminal ini sekarang boleh ditutup.")
+    print("Hentikan dengan: python main.py --end-background")
+
+def _end_background():
+    import signal
+    pidfile, _ = _runtime_paths(); pid = _background_pid()
+    if not pid:
+        pidfile.unlink(missing_ok=True); print("JARVIS background is not running."); return
+    if sys.platform == "win32":
+        _subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
+    else:
+        os.kill(pid, signal.SIGTERM)
+    pidfile.unlink(missing_ok=True)
+    print(f"JARVIS background stopped (PID {pid}).")
+
+def _pair_code():
+    import urllib.request, json
+    try:
+        req = urllib.request.Request("http://127.0.0.1:8000/api/local/pairing/new", method="POST", headers={"X-Jarvis-Local":"1"})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        print(f"PAIR CODE: {data['code']} (valid 10 minutes)")
+        if data.get("url"): print(f"PAIR URL: {data['url']}")
+    except Exception as e:
+        print("JARVIS core tidak sedang aktif atau Pair service belum siap.")
+        print("Jalankan --background, --cli, atau --ui terlebih dahulu.")
+        print(f"Detail: {e}")
+
 def _runtime_mode(argv=None):
     import argparse
     parser = argparse.ArgumentParser(description="JARVIS runtime")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--ui", action="store_true", help="desktop UI (default)")
-    group.add_argument("--cli", action="store_true", help="terminal interface")
-    group.add_argument("--background", action="store_true", help="headless background brain")
-    group.add_argument("--setup", action="store_true", help="configure JARVIS without opening the GUI")
+    group.add_argument("--cli", action="store_true", help="interactive terminal interface")
+    group.add_argument("--background", action="store_true", help="start detached background mode")
+    group.add_argument("--end-background", action="store_true", help="stop detached background mode")
+    group.add_argument("--background-status", action="store_true", help="show background status")
+    group.add_argument("--pair", action="store_true", help="get Pair Code from running JARVIS")
+    group.add_argument("--setup", action="store_true", help="configure JARVIS")
+    parser.add_argument("--background-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    return "setup" if args.setup else "cli" if args.cli else "background" if args.background else "ui"
+    if args.setup: return "setup"
+    if args.cli: return "cli"
+    if args.background: return "background"
+    if args.end_background: return "end-background"
+    if args.background_status: return "background-status"
+    if args.pair: return "pair"
+    if args.background_worker: return "background-worker"
+    return "ui"
 
 def main(argv=None):
     mode = _runtime_mode(argv)
     if mode == "setup":
         from core.setup_config import interactive_setup
-        if not interactive_setup(force=True):
-            raise SystemExit(1)
+        if not interactive_setup(force=True): raise SystemExit(1)
         return
+    if mode == "background": _start_background(); return
+    if mode == "end-background": _end_background(); return
+    if mode == "background-status":
+        pid = _background_pid(); print(f"JARVIS background is running (PID {pid})." if pid else "JARVIS background is not running."); return
+    if mode == "pair": _pair_code(); return
     if mode == "ui":
-        # Keep Qt entirely out of headless/CLI startup.
         from ui import JarvisUI
         ui = JarvisUI("face.png")
         def runner():
             ui.wait_for_api_key()
-            jarvis = JarvisLive(ui)
-            try:
-                asyncio.run(jarvis.run())
-            except KeyboardInterrupt:
-                print("\n🔴 Shutting down...")
+            try: asyncio.run(JarvisLive(ui).run())
+            except KeyboardInterrupt: pass
         threading.Thread(target=runner, daemon=True).start()
-        # Python only dispatches SIGINT on the main thread. Qt can otherwise
-        # keep that thread inside its native event loop forever, making Ctrl+C
-        # look ignored. A tiny Qt timer returns to Python regularly so the
-        # KeyboardInterrupt is delivered without changing the UI/runtime model.
         try:
             from PyQt6.QtCore import QTimer
-            _sigint_timer = QTimer()
-            _sigint_timer.timeout.connect(lambda: None)
-            _sigint_timer.start(100)
-            ui.root.mainloop()
+            timer = QTimer(); timer.timeout.connect(lambda: None); timer.start(100); ui.root.mainloop()
         except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
-            try:
-                ui._app.quit()
-            except Exception:
-                pass
+            try: ui._app.quit()
+            except Exception: pass
         return
-
     from core.interfaces import HeadlessInterface
-    interface = HeadlessInterface(cli=(mode == "cli"))
-    interface.wait_for_api_key()
-    jarvis = JarvisLive(interface)
+    interface = HeadlessInterface(cli=(mode == "cli")); interface.wait_for_api_key(); jarvis = JarvisLive(interface)
     if mode == "cli":
-        worker = threading.Thread(target=lambda: asyncio.run(jarvis.run()), daemon=True, name="jarvis-brain")
-        worker.start()
-        interface.run_cli()
-    else:
+        worker = threading.Thread(target=lambda: asyncio.run(jarvis.run()), daemon=True, name="jarvis-brain"); worker.start()
+        try: interface.run_cli()
+        except KeyboardInterrupt: pass
+        print("\\nCLI stopped."); return
+    pidfile, _ = _runtime_paths()
+    try:
+        pidfile.write_text(str(os.getpid()), encoding="utf-8")
         asyncio.run(jarvis.run())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            if pidfile.exists() and pidfile.read_text().strip() == str(os.getpid()): pidfile.unlink()
+        except Exception: pass
 
 if __name__ == "__main__":
     main()

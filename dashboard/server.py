@@ -653,6 +653,14 @@ class DashboardServer:
                 return JSONResponse({"error": "Pairing code invalid or expired"}, status_code=404)
             return JSONResponse(offer)
 
+        @app.post("/api/local/pairing/new")
+        async def local_pairing_new(req: Request):
+            host = req.client.host if req.client else ""
+            if host not in ("127.0.0.1", "::1") or req.headers.get("x-jarvis-local") != "1":
+                return JSONResponse({"error": "local access only"}, status_code=403)
+            offer = self.new_pairing_offer()
+            return JSONResponse({"code": offer["code"], "expires_at": offer["expires_at"], "url": self.get_pairing_url(offer)})
+
         @app.get("/", response_class=HTMLResponse)
         async def index():
             # Auth is handled client-side via sessionStorage bearer token.

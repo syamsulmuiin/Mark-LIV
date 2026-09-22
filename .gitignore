@@ -63,3 +63,6 @@ android-companion/**/build/
 # Downloaded Cloudflare transport binary / local remote-access state
 runtime/cloudflared/
 config/remote_access.json
+
+runtime/background.pid
+runtime/background.log
