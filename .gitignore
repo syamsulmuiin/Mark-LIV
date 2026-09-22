@@ -48,3 +48,18 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+
+# ── Paired-device identity and trust state ────────────────────────────────────
+devices/identity.json
+devices/trusted_devices.json
+
+# Android signing/build state — release keys must never be committed
+*.jks
+*.keystore
+android-companion/local.properties
+android-companion/.gradle/
+android-companion/**/build/
+
+# Downloaded Cloudflare transport binary / local remote-access state
+runtime/cloudflared/
+config/remote_access.json

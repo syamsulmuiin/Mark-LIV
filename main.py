@@ -48,7 +48,9 @@ import sounddevice as sd
 import numpy as np
 from google import genai
 from google.genai import types
-from ui import JarvisUI
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
@@ -489,6 +491,15 @@ TOOL_DECLARATIONS = [
     },
 ]
 
+# Paired-device tools are core tools because routing depends on the live dashboard mesh.
+TOOL_DECLARATIONS.extend([
+    {"name":"list_paired_devices", "description":"List trusted paired devices, their online state and allowed capabilities. Use this before targeting another device.", "parameters":{"type":"OBJECT","properties":{}}},
+    {"name":"call_paired_device", "description":"Run an explicitly permitted capability on a trusted paired device. Never invent a device id or capability; obtain them from list_paired_devices first.", "parameters":{"type":"OBJECT","properties":{
+        "device_id":{"type":"STRING"}, "capability":{"type":"STRING"},
+        "args":{"type":"OBJECT","description":"Arguments understood by that device capability."}},
+        "required":["device_id","capability"]}},
+])
+
 class _ReconnectSignal(Exception):
     """Raised inside the session TaskGroup to force a clean, voluntary reconnect
     (e.g. the user picked a new voice — the voice is fixed at connect time, so
@@ -528,7 +539,7 @@ def _keep_context_of(exc: BaseException) -> bool:
 
 
 class JarvisLive:
-    def __init__(self, ui: JarvisUI):
+    def __init__(self, ui):
         self.ui             = ui
         self._asst_name     = "JARVI    S"   # updated each session from config
         self.session              = None
@@ -823,10 +834,13 @@ class JarvisLive:
                 "Run: pip install fastapi \"uvicorn[standard]\" cryptography"
             )
             return None
-        key    = self._dashboard.new_key()
-        url    = self._dashboard.get_url()
+        offer  = self._dashboard.new_pairing_offer()
+        url    = self._dashboard.get_remote_url()
         manual = self._dashboard.get_manual_url()
-        return url, key, f"{url}/auto-login?key={key}", manual
+        # Keep the existing overlay contract: its QR target is now the secure
+        # device-pairing page, while the displayed six-character value remains
+        # useful as a human-verifiable pairing code.
+        return url, offer["code"], self._dashboard.get_pairing_url(offer), manual
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -1195,6 +1209,22 @@ class JarvisLive:
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
                 result = str(r)
+
+            elif name == "list_paired_devices":
+                if not self._dashboard:
+                    result = "Device mesh is unavailable."
+                else:
+                    devices = self._dashboard._mesh.list_devices()
+                    online = set(self._dashboard._device_sockets)
+                    for d in devices: d["online"] = d.get("device_id") in online
+                    result = json.dumps(devices, ensure_ascii=False) if devices else "No paired devices."
+
+            elif name == "call_paired_device":
+                if not self._dashboard:
+                    result = "Device mesh is unavailable."
+                else:
+                    reply = await self._dashboard.call_device(str(args.get("device_id", "")), str(args.get("capability", "")), args.get("args") or {})
+                    result = str(reply.get("result", reply)) if isinstance(reply, dict) else str(reply)
 
             elif name == "manage_monitor":
                 action = args.get("action", "").lower().strip()
@@ -2230,8 +2260,18 @@ class JarvisLive:
                     self.ui.write_log("ERR: API key invalid — please re-enter your key.")
                     self.ui.set_state("SLEEPING")
                     self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
-                        await asyncio.sleep(1)
+                    # Desktop UI can collect a replacement key in-place. CLI/background
+                    # deliberately never reach into Qt internals: CLI may run the shared
+                    # terminal setup, while background fails closed and must be restarted.
+                    if getattr(self.ui, "cli", False):
+                        from core.setup_config import interactive_setup
+                        if not await asyncio.to_thread(interactive_setup, True):
+                            raise RuntimeError("API key reconfiguration cancelled")
+                    elif self.ui.__class__.__name__ == "HeadlessInterface":
+                        raise RuntimeError("API key invalid. Run: python main.py --setup")
+                    else:
+                        while not self.ui._win._ready:
+                            await asyncio.sleep(1)
                     print("[JARVIS] New API key saved — reconnecting...")
                     _conn_backoff = 3
                     continue
@@ -2266,19 +2306,49 @@ class JarvisLive:
             print(f"[JARVIS] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
 
-def main():
-    ui = JarvisUI("face.png")
+def _runtime_mode(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description="JARVIS runtime")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--ui", action="store_true", help="desktop UI (default)")
+    group.add_argument("--cli", action="store_true", help="terminal interface")
+    group.add_argument("--background", action="store_true", help="headless background brain")
+    group.add_argument("--setup", action="store_true", help="configure JARVIS without opening the GUI")
+    args = parser.parse_args(argv)
+    return "setup" if args.setup else "cli" if args.cli else "background" if args.background else "ui"
 
-    def runner():
-        ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
-        try:
-            asyncio.run(jarvis.run())
-        except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+def main(argv=None):
+    mode = _runtime_mode(argv)
+    if mode == "setup":
+        from core.setup_config import interactive_setup
+        if not interactive_setup(force=True):
+            raise SystemExit(1)
+        return
+    if mode == "ui":
+        # Keep Qt entirely out of headless/CLI startup.
+        from ui import JarvisUI
+        ui = JarvisUI("face.png")
+        def runner():
+            ui.wait_for_api_key()
+            jarvis = JarvisLive(ui)
+            try:
+                asyncio.run(jarvis.run())
+            except KeyboardInterrupt:
+                print("\n🔴 Shutting down...")
+        threading.Thread(target=runner, daemon=True).start()
+        ui.root.mainloop()
+        return
 
-    threading.Thread(target=runner, daemon=True).start()
-    ui.root.mainloop()
+    from core.interfaces import HeadlessInterface
+    interface = HeadlessInterface(cli=(mode == "cli"))
+    interface.wait_for_api_key()
+    jarvis = JarvisLive(interface)
+    if mode == "cli":
+        worker = threading.Thread(target=lambda: asyncio.run(jarvis.run()), daemon=True, name="jarvis-brain")
+        worker.start()
+        interface.run_cli()
+    else:
+        asyncio.run(jarvis.run())
 
 if __name__ == "__main__":
     main()

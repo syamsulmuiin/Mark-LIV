@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">JARVIS Companion</string>
+    <string name="accessibility_description">Allows JARVIS to inspect and operate Android UI only after you explicitly enable this service.</string>
+</resources>

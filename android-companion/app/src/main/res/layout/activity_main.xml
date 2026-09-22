@@ -1,0 +1,9 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:padding="20dp" android:layout_width="match_parent" android:layout_height="match_parent">
+    <TextView android:id="@+id/status" android:text="Not paired" android:textSize="18sp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <EditText android:id="@+id/pairUrl" android:hint="Pairing URL from JARVIS" android:inputType="textUri" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <Button android:id="@+id/pair" android:text="PAIR / CONNECT" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <Button android:id="@+id/accessibility" android:text="ENABLE ANDROID UI CONTROL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <EditText android:id="@+id/command" android:hint="Command JARVIS" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <Button android:id="@+id/send" android:text="SEND COMMAND" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <TextView android:text="Native capabilities include notifications, vibration, clipboard, URL/app launch, plus optional Android UI inspection/click/text/scroll/navigation. UI control works only after you explicitly enable JARVIS Companion in Android Accessibility settings." android:paddingTop="16dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+</LinearLayout>

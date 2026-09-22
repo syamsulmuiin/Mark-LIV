@@ -16,6 +16,7 @@ import secrets
 import socket
 import string
 import time
+import json
 from pathlib import Path
 
 _DEPS_OK = False
@@ -36,6 +37,8 @@ except Exception:
     pass
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
+from core.device_mesh import DeviceMesh
+from core.cloudflare_tunnel import NamedTunnel, enabled as cloudflare_enabled
 STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000
 MAX_UPLOAD_MB = 500
@@ -466,11 +469,17 @@ class DashboardServer:
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
-        self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
+        self._device_sessions: dict[str, dict] = {}  # legacy browser sessions
+        self._mesh                         = DeviceMesh(BASE_DIR)
+        self._tunnel                       = NamedTunnel(f"http://127.0.0.1:{PORT}")
+        self._public_url                   = ""
+        self._device_sockets: dict[str, WebSocket] = {}
+        self._device_pending_calls: dict[str, asyncio.Future] = {}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
+        self._pair_html                   = _read("pair.html")
         self.app                          = self._build_app()
 
     # ── one-time key management ───────────────────────────────────────────
@@ -482,6 +491,19 @@ class DashboardServer:
         self._pending_keys[key] = now + expiry_secs
         return key
 
+    def new_pairing_offer(self, expiry_secs: int = 600) -> dict:
+        return self._mesh.create_pairing_offer(ttl=expiry_secs)
+
+    def get_pairing_url(self, offer: dict) -> str:
+        # Carry the JARVIS public identity in the QR. Native companions use this
+        # as the out-of-band trust anchor when the LAN dashboard uses a locally
+        # generated/self-signed TLS certificate.
+        from urllib.parse import quote
+        base = self.get_remote_url()
+        return (f"{base}/pair?code={quote(offer['code'])}"
+                f"&server_id={quote(self._mesh.device_id)}"
+                f"&server_key={quote(self._mesh.public_key)}")
+
     @staticmethod
     def _ssl_enabled() -> bool:
         certs = BASE_DIR / "config" / "certs"
@@ -490,6 +512,20 @@ class DashboardServer:
     def get_url(self) -> str:
         proto = "https" if self._ssl_enabled() else "http"
         return f"{proto}://{self._ip}:{PORT}"
+
+    def get_remote_url(self) -> str:
+        """Public tunnel URL when enabled, otherwise the normal LAN URL."""
+        return self._public_url or self.get_url()
+
+    async def _start_remote_tunnel(self) -> None:
+        if not cloudflare_enabled():
+            return
+        try:
+            self._public_url = await asyncio.to_thread(self._tunnel.start)
+            print(f"[Dashboard] Cloudflare remote access: {self._public_url}")
+        except Exception as e:
+            self._public_url = ""
+            print(f"[Dashboard] Cloudflare remote access unavailable: {e}")
 
     def get_manual_url(self) -> str:
         """URL for manual browser entry. When HTTPS active, points to alias port (also HTTPS)."""
@@ -533,6 +569,21 @@ class DashboardServer:
                 dead.add(ws)
         self._clients -= dead
 
+    async def call_device(self, device_id: str, capability: str, args: dict | None = None, timeout: float = 30.0):
+        """Invoke an explicitly permitted capability on a connected paired node."""
+        if not self._mesh.authorized(device_id, capability):
+            raise PermissionError(f"{device_id} is not allowed to use {capability}")
+        ws = self._device_sockets.get(device_id)
+        if ws is None: raise ConnectionError("device is offline")
+        call_id = secrets.token_urlsafe(12)
+        fut = asyncio.get_running_loop().create_future()
+        self._device_pending_calls[call_id] = fut
+        try:
+            await ws.send_json({"type":"capability.call", "call_id":call_id, "capability":capability, "args":args or {}})
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self._device_pending_calls.pop(call_id, None)
+
     # ── FastAPI app ───────────────────────────────────────────────────────
 
     def _build_app(self) -> "FastAPI":
@@ -554,6 +605,22 @@ class DashboardServer:
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
             return HTMLResponse(self._login_html)
+
+        @app.get("/pair", response_class=HTMLResponse)
+        async def pair_page():
+            return HTMLResponse(self._pair_html)
+
+        @app.get("/api/device-known/{device_id}")
+        async def device_known(device_id: str):
+            rec = self._mesh.get(device_id)
+            return JSONResponse({"known": bool(rec and not rec.get("revoked"))})
+
+        @app.get("/api/pairing/offer/{code}")
+        async def pairing_offer_public(code: str):
+            offer = self._mesh.pending_offer(code)
+            if not offer:
+                return JSONResponse({"error": "Pairing code invalid or expired"}, status_code=404)
+            return JSONResponse(offer)
 
         @app.get("/", response_class=HTMLResponse)
         async def index():
@@ -663,6 +730,75 @@ class DashboardServer:
             count = len(self._device_sessions)
             self._device_sessions.clear()
             return JSONResponse({"ok": True, "revoked": count})
+
+        # ── Trusted device mesh ─────────────────────────────────────────────
+        @app.get("/api/devices")
+        async def list_paired_devices(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return JSONResponse({"local": self._mesh.public_identity(), "devices": self._mesh.list_devices()})
+
+        @app.post("/api/pairing/offer")
+        async def pairing_offer(req: Request):
+            if not _auth(req):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return JSONResponse(self._mesh.create_pairing_offer())
+
+        @app.post("/api/pairing/accept")
+        async def pairing_accept(req: Request):
+            try:
+                body = await req.json()
+                rec = self._mesh.accept_pairing(body.get("code", ""), body.get("peer") or {},
+                                                body.get("signature", ""), body.get("capabilities"))
+                return JSONResponse({"ok": True, "local": self._mesh.public_identity(), "device": {k:v for k,v in rec.items() if k != "public_key"}})
+            except Exception as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+        @app.post("/api/devices/{device_id}/revoke")
+        async def revoke_paired_device(device_id: str, req: Request):
+            if not _auth(req): return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            ws = self._device_sockets.pop(device_id, None)
+            if ws:
+                try: await ws.close(code=4003)
+                except Exception: pass
+            return JSONResponse({"ok": self._mesh.revoke(device_id)})
+
+        @app.websocket("/ws/device")
+        async def device_mesh_ws(websocket: WebSocket, device_id: str = ""):
+            rec = self._mesh.get(device_id)
+            if not rec or rec.get("revoked"):
+                await websocket.close(code=4001); return
+            await websocket.accept()
+            challenge = secrets.token_urlsafe(32)
+            server_proof = self._mesh.sign((device_id + ":" + challenge).encode())
+            await websocket.send_json({"type": "challenge", "challenge": challenge,
+                                       "local": self._mesh.public_identity(),
+                                       "server_signature": server_proof})
+            try:
+                proof = await asyncio.wait_for(websocket.receive_json(), timeout=15)
+                if proof.get("type") != "proof" or not self._mesh.verify(rec["public_key"], challenge.encode(), proof.get("signature", "")):
+                    await websocket.close(code=4003); return
+                self._device_sockets[device_id] = websocket
+                self._mesh.touch(device_id)
+                await websocket.send_json({"type": "ready", "capabilities": rec.get("capabilities", [])})
+                while True:
+                    msg = await websocket.receive_json()
+                    if msg.get("type") == "jarvis.command":
+                        if not self._mesh.authorized(device_id, "jarvis.command"):
+                            await websocket.send_json({"type":"error","error":"capability denied"}); continue
+                        text = str(msg.get("text") or "").strip()
+                        if text:
+                            await self._command_queue.put(text)
+                            if self._wake_callback: self._wake_callback()
+                    elif msg.get("type") == "capability.result":
+                        call_id = str(msg.get("call_id") or "")
+                        fut = self._device_pending_calls.pop(call_id, None)
+                        if fut and not fut.done(): fut.set_result(msg)
+            except (WebSocketDisconnect, asyncio.TimeoutError):
+                pass
+            finally:
+                if self._device_sockets.get(device_id) is websocket:
+                    self._device_sockets.pop(device_id, None)
 
         @app.post("/api/command")
         async def command(req: Request):
@@ -858,6 +994,10 @@ class DashboardServer:
             print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
             print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
             return
+
+        # Start the optional outbound-only Cloudflare tunnel. It exposes the same
+        # dashboard/device WebSocket; JARVIS pairing still authenticates devices.
+        asyncio.create_task(self._start_remote_tunnel())
 
         # Firewall setup runs in a thread — uvicorn starts immediately,
         # no waiting for UAC dialogs or subprocess timeouts.
