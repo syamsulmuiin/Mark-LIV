@@ -3,10 +3,10 @@
 
     <LinearLayout android:id="@+id/pairPanel" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center" android:padding="28dp">
         <TextView android:text="JARVIS" android:textColor="#F4F5FF" android:textSize="18sp" android:textStyle="bold" android:letterSpacing="0.24" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <TextView android:text="PAIR DEVICE" android:textColor="#777E93" android:textSize="11sp" android:letterSpacing="0.16" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/pairCode" android:hint="6-character Pair Code" android:textColor="#FFFFFF" android:textColorHint="#555D72" android:textSize="20sp" android:gravity="center" android:letterSpacing="0.20" android:inputType="textCapCharacters" android:maxLength="6" android:singleLine="true" android:background="@drawable/bg_input" android:layout_marginTop="32dp" android:layout_width="match_parent" android:layout_height="58dp"/>
-        <Button android:id="@+id/pair" android:text="PAIR" android:textColor="#FFFFFF" android:textStyle="bold" android:background="@drawable/bg_button" android:layout_marginTop="14dp" android:layout_width="match_parent" android:layout_height="54dp"/>
-        <TextView android:id="@+id/pairStatus" android:text="Enter the Pair Code shown by JARVIS" android:textColor="#777E93" android:textSize="12sp" android:gravity="center" android:layout_marginTop="18dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <TextView android:text="@string/pair_device" android:textColor="#777E93" android:textSize="11sp" android:letterSpacing="0.16" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/pairCode" android:hint="@string/pair_code_hint" android:textColor="#FFFFFF" android:textColorHint="#555D72" android:textSize="20sp" android:gravity="center" android:letterSpacing="0.20" android:inputType="textCapCharacters" android:maxLength="6" android:singleLine="true" android:background="@drawable/bg_input" android:layout_marginTop="32dp" android:layout_width="match_parent" android:layout_height="58dp"/>
+        <Button android:id="@+id/pair" android:text="@string/pair" android:textColor="#FFFFFF" android:textStyle="bold" android:background="@drawable/bg_button" android:layout_marginTop="14dp" android:layout_width="match_parent" android:layout_height="54dp"/>
+        <TextView android:id="@+id/pairStatus" android:text="@string/pair_code_help" android:textColor="#777E93" android:textSize="12sp" android:gravity="center" android:layout_marginTop="18dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
     </LinearLayout>
 
     <LinearLayout android:id="@+id/voicePanel" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_horizontal" android:paddingBottom="12dp">
@@ -16,13 +16,13 @@
                 <TextView android:text="JARVIS" android:textColor="#F7F8F8" android:textSize="13sp" android:textStyle="bold" android:letterSpacing="0.20" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
                 <View android:layout_width="5dp" android:layout_height="5dp" android:layout_marginLeft="7dp" android:background="@drawable/bg_cyan_dot"/>
             </LinearLayout>
-            <ImageButton android:id="@+id/phoneControl" android:layout_width="48dp" android:layout_height="48dp" android:layout_gravity="end|center_vertical" android:background="@android:color/transparent" android:src="@drawable/ic_more_vertical" android:tint="#8A8F98" android:contentDescription="More options" android:padding="14dp"/>
+            <ImageButton android:id="@+id/phoneControl" android:layout_width="48dp" android:layout_height="48dp" android:layout_gravity="end|center_vertical" android:background="@android:color/transparent" android:src="@drawable/ic_more_vertical" android:tint="#8A8F98" android:contentDescription="@string/more_options" android:padding="14dp"/>
         </FrameLayout>
 
         <!-- Reactor keeps JARVIS identity but follows Hermes proportions/motion composition. -->
         <com.jarvis.companion.JarvisOrbView android:id="@+id/orb" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:contentDescription="JARVIS live reactor orb"/>
 
-        <TextView android:id="@+id/status" android:text="Connecting..." android:textColor="#F7F8F8" android:textSize="13sp" android:textStyle="bold" android:gravity="center" android:background="@drawable/bg_status_pill" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+        <TextView android:id="@+id/status" android:text="@string/connecting" android:textColor="#F7F8F8" android:textSize="13sp" android:textStyle="bold" android:gravity="center" android:background="@drawable/bg_status_pill" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
 
         <!-- Compact rolling transcript: same YOU/JARVIS result format, only the newest turns stay visible. -->
         <ScrollView android:id="@+id/transcriptScroll" android:layout_width="match_parent" android:layout_height="88dp" android:layout_marginLeft="20dp" android:layout_marginRight="20dp" android:layout_marginTop="8dp" android:fillViewport="false" android:background="@android:color/transparent" android:scrollbars="none">
@@ -30,8 +30,8 @@
         </ScrollView>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="72dp" android:layout_marginTop="6dp">
-            <Button android:id="@+id/startConversation" android:visibility="gone" android:text="MULAI PERCAKAPAN" android:textColor="#001417" android:textSize="15sp" android:textStyle="bold" android:drawableStart="@drawable/ic_voice_wave" android:drawablePadding="12dp" android:gravity="center" android:paddingLeft="24dp" android:paddingRight="24dp" android:background="@drawable/bg_start_conversation" android:layout_width="match_parent" android:layout_height="58dp" android:layout_gravity="center"/>
-            <Button android:id="@+id/endConversation" android:text="×" android:textColor="#FFFFFF" android:textSize="30sp" android:gravity="center" android:padding="0dp" android:background="@drawable/bg_end_circle" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:contentDescription="End conversation"/>
+            <Button android:id="@+id/startConversation" android:visibility="gone" android:text="@string/start_conversation" android:textColor="#001417" android:textSize="15sp" android:textStyle="bold" android:drawableStart="@drawable/ic_voice_wave" android:drawablePadding="12dp" android:gravity="center" android:paddingLeft="24dp" android:paddingRight="24dp" android:background="@drawable/bg_start_conversation" android:layout_width="wrap_content" android:minWidth="230dp" android:layout_height="58dp" android:layout_gravity="center"/>
+            <Button android:id="@+id/endConversation" android:text="×" android:textColor="#FFFFFF" android:textSize="30sp" android:gravity="center" android:padding="0dp" android:background="@drawable/bg_end_circle" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:contentDescription="@string/end_conversation"/>
         </FrameLayout>
     </LinearLayout>
 </FrameLayout>

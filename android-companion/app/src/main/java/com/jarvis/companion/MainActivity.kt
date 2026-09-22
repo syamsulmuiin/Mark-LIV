@@ -64,13 +64,14 @@ class MainActivity : AppCompatActivity() {
         if (intent?.data==null && prefs.getBoolean("paired", false)) { showVoice(); connect() }
     }
 
-    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text="Connecting..."; orb.state="CONNECTING"; endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE } }
+    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text=getString(R.string.connecting); orb.state="CONNECTING"; endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE } }
 
     private fun showPhoneControlMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
-            menu.add("Enable Phone Control")
+            if (Build.VERSION.SDK_INT >= 29) setForceShowIcon(true)
+            menu.add(0, 1, 0, getString(R.string.enable_phone_control)).setIcon(android.R.drawable.ic_menu_manage)
             setOnMenuItemClickListener { item ->
-                if (item.title == "Enable Phone Control") {
+                if (item.itemId == 1) {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                     true
                 } else false
@@ -90,8 +91,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun pairWithCode(rawCode:String) {
         val code=rawCode.trim().uppercase()
-        if(code.length != 6){ pairStatus.text="Enter the 6-character Pair Code shown by JARVIS"; return }
-        pairStatus.text="Pairing..."
+        if(code.length != 6){ pairStatus.text=getString(R.string.pair_code_help); return }
+        pairStatus.text=getString(R.string.pairing)
         val ident=identity()
         val peer=JSONObject().put("device_id",ident.first).put("name",Build.MODEL).put("public_key",b64(ident.third))
         client.newCall(Request.Builder().url("$serverBase/api/pairing/offer/$code").build()).enqueue(object:Callback{
@@ -166,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
     }}
     private fun endVoice(){ stopMic(); try{player?.pause();player?.flush()}catch(_:Exception){}; ws?.close(1000,"conversation ended"); ws=null; setEnded() }
-    private fun setEnded()=runOnUiThread { status.text="Conversation ended"; orb.state="SLEEPING"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }
+    private fun setEnded()=runOnUiThread { status.text=getString(R.string.conversation_ended); orb.state="SLEEPING"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }
     private fun pcmLevel(b:ByteArray,n:Int):Float { if(n<2)return 0f; var sum=0.0; var count=0; var i=0; while(i+1<n){ val v=((b[i+1].toInt() shl 8) or (b[i].toInt() and 255)).toShort().toInt(); sum+=v.toDouble()*v;count++;i+=2 }; if(count==0)return 0f; return (sqrt(sum/count)/3500.0).toFloat().coerceIn(0f,1f) }
 
     private fun executeCapability(w:WebSocket,m:JSONObject){ val cap=m.optString("capability"); val a=m.optJSONObject("args")?:JSONObject(); var ok=true; var result="done"; try { when(cap){
