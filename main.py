@@ -2365,7 +2365,7 @@ class JarvisLive:
 def _runtime_paths():
     runtime = BASE_DIR / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
-    return runtime / "background.pid", runtime / "background.log"
+    return runtime / "background.pid", runtime / "error.log"
 
 def _pid_alive(pid):
     try:
@@ -2390,8 +2390,11 @@ def _start_background():
     if (pid := _background_pid()):
         print(f"JARVIS background is already running (PID {pid}).")
         return
-    log = open(logfile, "a", encoding="utf-8", buffering=1)
-    kwargs = dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
+    # The detached child installs its own error-only rotating stream. Keep the
+    # launcher completely detached from this terminal and do not persist normal
+    # stdout/status chatter.
+    kwargs = dict(stdin=_subprocess.DEVNULL, stdout=_subprocess.DEVNULL,
+                  stderr=_subprocess.DEVNULL, cwd=str(BASE_DIR))
     if sys.platform == "win32":
         kwargs["creationflags"] = _subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS | _subprocess.CREATE_NO_WINDOW
     else:
@@ -2425,6 +2428,103 @@ def _pair_code():
         print("JARVIS core tidak sedang aktif atau Pair service belum siap.")
         print("Jalankan --background, --cli, atau --ui terlebih dahulu.")
         print(f"Detail: {e}")
+
+
+def _install_background_error_log():
+    """Persist only error-like output for detached mode, with bounded rotation.
+
+    error.log is capped at 5 MiB and keeps three older generations. Normal
+    JARVIS status/output is discarded so a 24/7 process cannot grow the log
+    simply by staying healthy. Traceback continuation lines are retained once
+    an error header is seen.
+    """
+    import io
+    import threading as _threading
+
+    _, logfile = _runtime_paths()
+    max_bytes = 5 * 1024 * 1024
+    backups = 3
+    lock = _threading.RLock()
+    markers = (
+        "error", "exception", "traceback", "failed", "failure", "fatal",
+        "critical", "policy violation", "rejected", "unhandled",
+    )
+
+    def rotate_if_needed(extra):
+        try:
+            size = logfile.stat().st_size if logfile.exists() else 0
+            if size + extra <= max_bytes:
+                return
+            oldest = logfile.with_name(logfile.name + f".{backups}")
+            oldest.unlink(missing_ok=True)
+            for n in range(backups - 1, 0, -1):
+                src = logfile.with_name(logfile.name + f".{n}")
+                if src.exists():
+                    src.replace(logfile.with_name(logfile.name + f".{n+1}"))
+            if logfile.exists():
+                logfile.replace(logfile.with_name(logfile.name + ".1"))
+        except Exception:
+            pass
+
+    class ErrorOnlyStream(io.TextIOBase):
+        def __init__(self):
+            self._buf = ""
+            self._trace = False
+        @property
+        def encoding(self): return "utf-8"
+        def writable(self): return True
+        def isatty(self): return False
+        def flush(self):
+            if self._buf:
+                self._emit(self._buf, final=True); self._buf = ""
+        def write(self, data):
+            if not data: return 0
+            self._buf += str(data)
+            while "\n" in self._buf:
+                line, self._buf = self._buf.split("\n", 1)
+                self._emit(line + "\n")
+            return len(data)
+        def _emit(self, line, final=False):
+            low = line.lower()
+            starts_error = any(m in low for m in markers)
+            continuation = self._trace and (
+                line.startswith((" ", "\t"))
+                or line.startswith(("During handling", "The above exception", "+-", "|"))
+                or starts_error
+                or not line.strip()
+            )
+            if starts_error:
+                self._trace = True
+            elif self._trace and not continuation:
+                self._trace = False
+            if not (starts_error or continuation):
+                return
+            stamp = datetime.now().isoformat(timespec="seconds")
+            payload = f"[{stamp}] {line}" if starts_error and not continuation else line
+            raw = payload.encode("utf-8", errors="replace")
+            with lock:
+                rotate_if_needed(len(raw))
+                try:
+                    with open(logfile, "ab") as f:
+                        f.write(raw)
+                except Exception:
+                    pass
+
+    stream = ErrorOnlyStream()
+    sys.stdout = stream
+    sys.stderr = stream
+
+    # Errors from fire-and-forget asyncio tasks must also be persisted instead
+    # of disappearing as an unobserved task exception.
+    def install_loop_handler(loop):
+        def handler(_loop, context):
+            exc = context.get("exception")
+            msg = context.get("message", "Unhandled asyncio error")
+            print(f"ERROR: {msg}", file=sys.stderr)
+            if exc is not None:
+                traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
+        loop.set_exception_handler(handler)
+    return install_loop_handler
 
 def _runtime_mode(argv=None):
     import argparse
@@ -2482,9 +2582,13 @@ def main(argv=None):
         except KeyboardInterrupt: pass
         print("\\nCLI stopped."); return
     pidfile, _ = _runtime_paths()
+    install_loop_handler = _install_background_error_log()
     try:
         pidfile.write_text(str(os.getpid()), encoding="utf-8")
-        asyncio.run(jarvis.run())
+        async def _background_main():
+            install_loop_handler(asyncio.get_running_loop())
+            await jarvis.run()
+        asyncio.run(_background_main())
     except KeyboardInterrupt:
         pass
     finally:

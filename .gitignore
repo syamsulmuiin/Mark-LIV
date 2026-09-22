@@ -66,3 +66,6 @@ config/remote_access.json
 
 runtime/background.pid
 runtime/background.log
+
+runtime/error.log
+runtime/error.log.*
