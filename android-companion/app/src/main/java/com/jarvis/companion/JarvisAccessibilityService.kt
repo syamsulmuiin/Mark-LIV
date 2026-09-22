@@ -111,7 +111,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         return JSONObject().put("package", root.packageName?.toString().orEmpty()).put("nodes", arr)
     }
 
-    private fun normalize(s: String) = s.lowercase().replace(Regex("[^\p{L}\p{N}]+"), "").trim()
+    private fun normalize(s: String) = s.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), "").trim()
     private fun collectNodes(n: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
         out += n
         for (i in 0 until n.childCount) n.getChild(i)?.let { collectNodes(it, out) }
