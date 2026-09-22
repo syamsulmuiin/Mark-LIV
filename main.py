@@ -2131,6 +2131,12 @@ class JarvisLive:
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             asyncio.create_task(self._dashboard.serve())
+            # Pairing is a core/device-mesh feature, not a Qt feature. Make a
+            # fresh offer available in CLI/background as soon as the transport starts.
+            if getattr(self.ui, "cli", False) or self.ui.__class__.__name__ == "HeadlessInterface":
+                offer = self._dashboard.new_pairing_offer()
+                self.ui.write_log(f"PAIR CODE: {offer['code']} (valid 10 minutes)")
+                self.ui.write_log(f"PAIR URL: {self._dashboard.get_pairing_url(offer)}")
             # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())
         except Exception as e:
@@ -2285,7 +2291,10 @@ class JarvisLive:
                     continue
 
                 # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
+                if any(marker in err_str.lower() for marker in (
+                    "api key not valid", "api_key_invalid", "invalid api key",
+                    "api key expired", "permission_denied: api key"
+                )):
                     self.ui.write_log("ERR: API key invalid — please re-enter your key.")
                     self.ui.set_state("SLEEPING")
                     self.ui.prompt_reconfig()

@@ -91,27 +91,15 @@ def main() -> None:
 
     _check_assets()
 
-    # Remote access is optional, but installation is handled by this setup so
-    # users never have to install cloudflared separately.
-    try:
-        ans = input("\nEnable Cloudflare remote access for paired devices outside your LAN? [Y/n]: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        ans = "n"
-    if ans not in ("n", "no"):
-        try:
-            from core.cloudflare_tunnel import install, configure_named_tunnel, DEFAULT_HOSTNAME
-            import getpass
-            install()
-            print(f"Permanent JARVIS endpoint: https://{DEFAULT_HOSTNAME}")
-            print("In Cloudflare, create a remotely-managed tunnel and set Public Hostname to this host with service http://localhost:8000.")
-            token = getpass.getpass("Cloudflare Tunnel token: ").strip()
-            if not token:
-                raise ValueError("Tunnel token was empty")
-            configure_named_tunnel(token, DEFAULT_HOSTNAME, True)
-            print(f"✓ Cloudflare Named Tunnel configured: https://{DEFAULT_HOSTNAME}")
-        except Exception as e:
-            print(f"⚠️  Cloudflare remote transport could not be installed: {e}")
-            print("    LAN pairing will still work; rerun python main.py --setup later to retry.")
+    # One setup path for all runtimes. This is the same configuration used by
+    # `python main.py --setup`; setup.py only adds dependency installation first.
+    from core.setup_config import configured, interactive_setup
+    if not configured():
+        if not interactive_setup(force=True):
+            print("\n❌ JARVIS configuration was not completed.")
+            sys.exit(1)
+    else:
+        print("\n✓ Existing JARVIS configuration found; Gemini key is kept unchanged.")
 
     # ── OS-specific post-install notes ────────────────────────────────────────
     if OS == "Windows":
@@ -143,7 +131,7 @@ def main() -> None:
 
     print("\n✅ Setup complete!")
     print("   1) Launch it:  python main.py")
-    print("   2) Configure the Gemini API key with: python main.py --setup")
+    print("   2) Reconfigure later only if needed: python main.py --setup")
     print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
 
 
