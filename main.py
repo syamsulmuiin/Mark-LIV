@@ -35,6 +35,7 @@ for _stream in ("stdout", "stderr"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import os
 import re
 import threading
 import time
@@ -2574,6 +2575,10 @@ def main(argv=None):
             try: ui._app.quit()
             except Exception: pass
         return
+    # Detached mode must capture startup failures too (configuration, interface,
+    # JarvisLive construction), not only errors after the event loop starts.
+    install_loop_handler = _install_background_error_log() if mode == "background-worker" else None
+
     from core.interfaces import HeadlessInterface
     interface = HeadlessInterface(cli=(mode == "cli")); interface.wait_for_api_key(); jarvis = JarvisLive(interface)
     if mode == "cli":
@@ -2582,7 +2587,6 @@ def main(argv=None):
         except KeyboardInterrupt: pass
         print("\\nCLI stopped."); return
     pidfile, _ = _runtime_paths()
-    install_loop_handler = _install_background_error_log()
     try:
         pidfile.write_text(str(os.getpid()), encoding="utf-8")
         async def _background_main():
