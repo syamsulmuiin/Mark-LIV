@@ -9,7 +9,7 @@
         <TextView android:id="@+id/pairStatus" android:text="Enter the Pair Code shown by JARVIS" android:textColor="#777E93" android:textSize="12sp" android:gravity="center" android:layout_marginTop="18dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
     </LinearLayout>
 
-    <LinearLayout android:id="@+id/voicePanel" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_horizontal" android:paddingLeft="20dp" android:paddingRight="20dp" android:paddingBottom="18dp">
+    <LinearLayout android:id="@+id/voicePanel" android:visibility="gone" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:gravity="center_horizontal" android:paddingBottom="12dp">
         <!-- Hermes-style app bar: centered identity and unobtrusive overflow menu. -->
         <FrameLayout android:layout_width="match_parent" android:layout_height="64dp">
             <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_gravity="center" android:orientation="horizontal" android:gravity="center">
@@ -20,17 +20,17 @@
         </FrameLayout>
 
         <!-- Reactor keeps JARVIS identity but follows Hermes proportions/motion composition. -->
-        <com.jarvis.companion.JarvisOrbView android:id="@+id/orb" android:layout_width="match_parent" android:layout_height="280dp" android:contentDescription="JARVIS live reactor orb"/>
+        <com.jarvis.companion.JarvisOrbView android:id="@+id/orb" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:contentDescription="JARVIS live reactor orb"/>
 
         <TextView android:id="@+id/status" android:text="Connecting..." android:textColor="#F7F8F8" android:textSize="13sp" android:textStyle="bold" android:gravity="center" android:background="@drawable/bg_status_pill" android:paddingLeft="14dp" android:paddingRight="14dp" android:paddingTop="8dp" android:paddingBottom="8dp" android:layout_marginTop="8dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
 
-        <!-- Keep the existing JARVIS conversation/results presentation unchanged. -->
-        <ScrollView android:id="@+id/transcriptScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="14dp" android:fillViewport="true">
-            <TextView android:id="@+id/transcript" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#C9CDDC" android:textSize="13sp" android:lineSpacingExtra="5dp" android:padding="8dp"/>
+        <!-- Compact rolling transcript: same YOU/JARVIS result format, only the newest turns stay visible. -->
+        <ScrollView android:id="@+id/transcriptScroll" android:layout_width="match_parent" android:layout_height="88dp" android:layout_marginLeft="20dp" android:layout_marginRight="20dp" android:layout_marginTop="8dp" android:fillViewport="false" android:background="@android:color/transparent" android:scrollbars="none">
+            <TextView android:id="@+id/transcript" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#99C9CDDC" android:textSize="12sp" android:lineSpacingExtra="3dp" android:paddingLeft="8dp" android:paddingRight="8dp" android:paddingTop="4dp" android:paddingBottom="4dp"/>
         </ScrollView>
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="72dp" android:layout_marginTop="6dp">
-            <Button android:id="@+id/startConversation" android:visibility="gone" android:text="MULAI PERCAKAPAN" android:textColor="#001417" android:textSize="15sp" android:textStyle="bold" android:drawableStart="@drawable/ic_voice_wave" android:drawablePadding="10dp" android:gravity="center" android:background="@drawable/bg_start_conversation" android:layout_width="match_parent" android:layout_height="58dp" android:layout_gravity="center"/>
+            <Button android:id="@+id/startConversation" android:visibility="gone" android:text="MULAI PERCAKAPAN" android:textColor="#001417" android:textSize="15sp" android:textStyle="bold" android:drawableStart="@drawable/ic_voice_wave" android:drawablePadding="12dp" android:gravity="center" android:paddingLeft="24dp" android:paddingRight="24dp" android:background="@drawable/bg_start_conversation" android:layout_width="match_parent" android:layout_height="58dp" android:layout_gravity="center"/>
             <Button android:id="@+id/endConversation" android:text="×" android:textColor="#FFFFFF" android:textSize="30sp" android:gravity="center" android:padding="0dp" android:background="@drawable/bg_end_circle" android:layout_width="64dp" android:layout_height="64dp" android:layout_gravity="center" android:contentDescription="End conversation"/>
         </FrameLayout>
     </LinearLayout>

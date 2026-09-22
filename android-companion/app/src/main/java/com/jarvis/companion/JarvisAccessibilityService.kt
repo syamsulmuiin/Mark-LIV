@@ -37,6 +37,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             "recents" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
             "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
+            "lock", "lock_screen" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else error("Lock screen requires Android 9 or newer")
             else -> error("Unsupported global action: $action")
         }
         if (!performGlobalAction(a)) error("Android rejected global action: $action")
@@ -44,17 +45,27 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun click(text: String, viewId: String = ""): String {
-        val root = rootInActiveWindow ?: error("No active Android window")
-        val matches = mutableListOf<AccessibilityNodeInfo>()
-        if (viewId.isNotBlank()) matches += root.findAccessibilityNodeInfosByViewId(viewId)
-        if (text.isNotBlank()) matches += root.findAccessibilityNodeInfosByText(text)
-        val target = matches.firstOrNull() ?: error("UI element not found")
-        var n: AccessibilityNodeInfo? = target
-        while (n != null) {
-            if (n.isClickable && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "clicked"
-            n = n.parent
+        repeat(3) { attempt ->
+            val root = rootInActiveWindow ?: if (attempt < 2) { Thread.sleep(250); return@repeat } else error("No active Android window")
+            val all = mutableListOf<AccessibilityNodeInfo>()
+            collectNodes(root, all)
+            val wanted = normalize(text)
+            val candidates = all.filter { n ->
+                (viewId.isNotBlank() && n.viewIdResourceName == viewId) ||
+                (wanted.isNotBlank() && (normalize(n.text?.toString().orEmpty()) == wanted || normalize(n.contentDescription?.toString().orEmpty()) == wanted))
+            } + all.filter { n ->
+                wanted.isNotBlank() && (normalize(n.text?.toString().orEmpty()).contains(wanted) || normalize(n.contentDescription?.toString().orEmpty()).contains(wanted))
+            }
+            for (target in candidates.distinct()) {
+                var n: AccessibilityNodeInfo? = target
+                while (n != null) {
+                    if (n.isClickable && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "clicked"
+                    n = n.parent
+                }
+            }
+            if (attempt < 2) Thread.sleep(250)
         }
-        error("UI element is not clickable")
+        error("UI element not found or not clickable")
     }
 
     fun setText(text: String, targetText: String = "", viewId: String = ""): String {
@@ -98,6 +109,12 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
         walk(root, 0)
         return JSONObject().put("package", root.packageName?.toString().orEmpty()).put("nodes", arr)
+    }
+
+    private fun normalize(s: String) = s.lowercase().replace(Regex("[^\p{L}\p{N}]+"), "").trim()
+    private fun collectNodes(n: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
+        out += n
+        for (i in 0 until n.childCount) n.getChild(i)?.let { collectNodes(it, out) }
     }
 
     private fun collectEditable(n: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {

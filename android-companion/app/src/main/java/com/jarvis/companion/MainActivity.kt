@@ -101,7 +101,7 @@ class MainActivity : AppCompatActivity() {
                 val o=try { JSONObject(response.body?.string().orEmpty()) } catch(_:Exception){ pairUi("Invalid response from JARVIS"); return }
                 val nonce=o.optString("nonce"); val serverKey=o.optString("public_key"); val serverId=o.optString("device_id")
                 if(nonce.isBlank()||serverKey.isBlank()||serverId.isBlank()){pairUi("Pairing code invalid or expired");return}
-                val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.settings.open","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global"))
+                val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.settings.open","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global","android.screen.lock","android.screen.wake"))
                 val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
                 val req=Request.Builder().url("$serverBase/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
                 client.newCall(req).enqueue(object:Callback{
@@ -157,10 +157,12 @@ class MainActivity : AppCompatActivity() {
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){ super.onRequestPermissionsResult(requestCode,permissions,grantResults); if(requestCode==42){ if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) startMic() else ui("Microphone permission is required for Live Voice") } }
 
     private fun setVoiceState(s:String)=runOnUiThread { status.text=s.lowercase().replaceFirstChar { it.uppercase() }; orb.state=s }
+    private val transcriptTurns = ArrayDeque<String>()
     private fun appendTranscript(speaker:String,text:String){ if(text.isBlank()) return; runOnUiThread {
         val who=if(speaker.equals("user",true)) "YOU" else "JARVIS"
-        if(transcript.text.isNotEmpty()) transcript.append("\n\n")
-        transcript.append("$who  $text")
+        transcriptTurns.addLast("$who  $text")
+        while(transcriptTurns.size > 4) transcriptTurns.removeFirst()
+        transcript.text=transcriptTurns.joinToString("\n\n")
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
     }}
     private fun endVoice(){ stopMic(); try{player?.pause();player?.flush()}catch(_:Exception){}; ws?.close(1000,"conversation ended"); ws=null; setEnded() }
@@ -179,6 +181,8 @@ class MainActivity : AppCompatActivity() {
         "android.ui.text"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.setText(a.getString("text"),a.optString("target_text"),a.optString("view_id")) }
         "android.ui.scroll"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.scroll(a.optString("direction","down")) }
         "android.ui.global"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.global(a.getString("action")) }
+        "android.screen.lock"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.global("lock") }
+        "android.screen.wake"->{ val pm=getSystemService(POWER_SERVICE) as PowerManager; if(!pm.isInteractive){ @Suppress("DEPRECATION") val wl=pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,"jarvis:wake"); wl.acquire(3000) }; result="screen awake; device authentication is still required" }
         else->{ok=false;result="Unsupported capability: $cap"}
     }}catch(e:Exception){ok=false;result=e.message?:e.toString()}; w.send(JSONObject().put("type","capability.result").put("call_id",m.optString("call_id")).put("ok",ok).put("result",result).toString()) }
 

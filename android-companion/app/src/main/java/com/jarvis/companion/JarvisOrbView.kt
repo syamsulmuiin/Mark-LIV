@@ -18,7 +18,7 @@ class JarvisOrbView @JvmOverloads constructor(c: Context, a: AttributeSet?=null)
     fun audioLevel(v:Float){ targetAmp=max(targetAmp,v.coerceIn(0f,1f)) }
     private fun col(alpha:Int=255)=Color.argb(alpha,22,217,245)
     private fun accent(alpha:Int=255)=when(state){"SPEAKING"->Color.argb(alpha,255,138,76);"THINKING","PROCESSING","CONNECTING"->Color.argb(alpha,245,185,66);"LISTENING"->Color.argb(alpha,48,217,154);else->col(alpha)}
-    override fun onDraw(c:Canvas){ super.onDraw(c); val w=width.toFloat(); val h=height.toFloat(); val cx=w/2; val cy=h*.43f; val r=min(w,h)*.355f
+    override fun onDraw(c:Canvas){ super.onDraw(c); val w=width.toFloat(); val h=height.toFloat(); val cx=w/2; val cy=h*.46f; val r=min(w,h)*.44f
         c.drawColor(Color.rgb(5,8,14)); p.style=Paint.Style.STROKE
         // full-canvas crosshair and corner framing, matching desktop reactor geometry
         p.strokeWidth=1f; p.color=col(38); c.drawLine(0f,cy,cx-r*.62f,cy,p); c.drawLine(cx+r*.62f,cy,w,cy,p); c.drawLine(cx,0f,cx,cy-r*.62f,p); c.drawLine(cx,cy+r*.62f,cx,h,p)
@@ -38,7 +38,7 @@ class JarvisOrbView @JvmOverloads constructor(c: Context, a: AttributeSet?=null)
         val inner=r*.355f;p.color=accent((80+amp*110).toInt());p.strokeWidth=1.7f;c.drawCircle(cx,cy,inner,p)
         p.style=Paint.Style.FILL;p.color=Color.argb(235,221,251,255);p.textAlign=Paint.Align.CENTER;p.typeface=Typeface.create("sans-serif",Typeface.BOLD);p.textSize=max(13f,r*.105f);c.drawText("JARVIS",cx,cy-(p.ascent()+p.descent())/2,p)
         // Hermes-style 32-bar voice waveform under the reactor, driven by the same live amplitude.
-        val bars=32; val waveW=w*.72f; val left=(w-waveW)/2f; val base=h*.94f; val gap=waveW/bars
+        val bars=32; val waveW=w*.72f; val left=(w-waveW)/2f; val base=h*.965f; val gap=waveW/bars
         p.strokeCap=Paint.Cap.ROUND; p.strokeWidth=max(1f,gap-2f); p.color=if(amp>.05f) col(235) else Color.argb(165,8,122,140)
         for(i in 0 until bars){ val middle=(bars-1)/2f; val envelope=1f-abs(i-middle)/middle; val shimmer=.55f+.45f*sin(phase*.035f+i*.7f); val hh=2f+amp*h*.065f*envelope*shimmer; val x=left+i*gap+gap/2f; c.drawLine(x,base,x,base-hh,p) }
         p.strokeCap=Paint.Cap.BUTT

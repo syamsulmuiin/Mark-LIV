@@ -334,9 +334,14 @@ TOOL_DECLARATIONS = [
             "in args.app (for example WhatsApp); the Android companion resolves the installed package itself. "
             "For Android Settings use android.settings.open with optional args.page such as bluetooth, wifi, "
             "apps, accessibility, display, sound, location, security, battery, date/time, or keyboard. "
-            "For a menu not directly addressable by Android Settings, open its closest settings page, then use "
-            "android.ui.inspect followed by android.ui.click/scroll as needed. Never invent a package name when "
-            "the user supplied an app name."
+            "For any installed app, app.launch opens it by natural app name. To reach a main menu, submenu, conversation, "
+            "button, field, or other in-app destination, launch the app then repeatedly use android.ui.inspect and "
+            "android.ui.click/android.ui.scroll/android.ui.text step by step until the requested destination is reached. "
+            "Use open_url when the user provides a supported deep link/URL shortcut. For Android Settings use "
+            "android.settings.open for direct system pages, otherwise inspect/click through nested pages. Use "
+            "android.screen.lock to lock the phone and android.screen.wake only to wake the display; never bypass PIN, "
+            "pattern, password, biometrics, app authentication, CAPTCHAs, or permission/confirmation screens. "
+            "Never invent a package name when the user supplied an app name."
         ),
         "parameters": {
             "type": "OBJECT",
