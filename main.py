@@ -330,10 +330,13 @@ TOOL_DECLARATIONS = [
     {
         "name": "call_paired_device",
         "description": (
-            "Control an online trusted paired device. For a request such as open phone settings, "
-            "first list paired devices when the target is not already unambiguous, then call the device. "
-            "Use only a capability reported for that device. Android supports android.settings.open, "
-            "app.launch, open_url, notification, vibration, clipboard.write and android.ui.* capabilities."
+            "Control an online trusted paired device. Use natural app names with app.launch: put the app name "
+            "in args.app (for example WhatsApp); the Android companion resolves the installed package itself. "
+            "For Android Settings use android.settings.open with optional args.page such as bluetooth, wifi, "
+            "apps, accessibility, display, sound, location, security, battery, date/time, or keyboard. "
+            "For a menu not directly addressable by Android Settings, open its closest settings page, then use "
+            "android.ui.inspect followed by android.ui.click/scroll as needed. Never invent a package name when "
+            "the user supplied an app name."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -513,14 +516,6 @@ TOOL_DECLARATIONS = [
     },
 ]
 
-# Paired-device tools are core tools because routing depends on the live dashboard mesh.
-TOOL_DECLARATIONS.extend([
-    {"name":"list_paired_devices", "description":"List trusted paired devices, their online state and allowed capabilities. Use this before targeting another device.", "parameters":{"type":"OBJECT","properties":{}}},
-    {"name":"call_paired_device", "description":"Run an explicitly permitted capability on a trusted paired device. Never invent a device id or capability; obtain them from list_paired_devices first.", "parameters":{"type":"OBJECT","properties":{
-        "device_id":{"type":"STRING"}, "capability":{"type":"STRING"},
-        "args":{"type":"OBJECT","description":"Arguments understood by that device capability."}},
-        "required":["device_id","capability"]}},
-])
 
 class _ReconnectSignal(Exception):
     """Raised inside the session TaskGroup to force a clean, voluntary reconnect

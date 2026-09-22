@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.*
 import android.content.*
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.media.*
 import android.net.Uri
 import android.os.*
@@ -37,6 +38,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var transcript: TextView
     private lateinit var transcriptScroll: ScrollView
     private lateinit var endConversation: Button
+    private lateinit var startConversation: Button
+    private lateinit var phoneControl: ImageButton
     private var ws: WebSocket? = null
     private var recorder: AudioRecord? = null
     private var player: AudioTrack? = null
@@ -51,16 +54,30 @@ class MainActivity : AppCompatActivity() {
         status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode)
         pairPanel=findViewById(R.id.pairPanel); voicePanel=findViewById(R.id.voicePanel)
         orb=findViewById(R.id.orb); transcript=findViewById(R.id.transcript); transcriptScroll=findViewById(R.id.transcriptScroll); endConversation=findViewById(R.id.endConversation)
+        startConversation=findViewById(R.id.startConversation); phoneControl=findViewById(R.id.phoneControl)
         findViewById<Button>(R.id.pair).setOnClickListener { pairWithCode(pairCode.text.toString()) }
-        findViewById<Button>(R.id.interrupt).setOnClickListener { ws?.send(JSONObject().put("type","jarvis.interrupt").toString()) }
-        endConversation.setOnClickListener { if(micRunning || ws != null) endVoice() else connect() }
-        findViewById<Button>(R.id.accessibility).setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        endConversation.setOnClickListener { endVoice() }
+        startConversation.setOnClickListener { connect() }
+        phoneControl.setOnClickListener { showPhoneControlMenu(it) }
         if (Build.VERSION.SDK_INT>=33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
         intent?.data?.getQueryParameter("code")?.let { pairCode.setText(it.uppercase()); pairWithCode(it) }
         if (intent?.data==null && prefs.getBoolean("paired", false)) { showVoice(); connect() }
     }
 
-    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text="Connecting..."; orb.state="CONNECTING"; endConversation.text="END" } }
+    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text="Connecting..."; orb.state="CONNECTING"; endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE } }
+
+    private fun showPhoneControlMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add("Enable Phone Control")
+            setOnMenuItemClickListener { item ->
+                if (item.title == "Enable Phone Control") {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    true
+                } else false
+            }
+            show()
+        }
+    }
     private fun showPair(message:String){ stopMic(); runOnUiThread { voicePanel.visibility=View.GONE; pairPanel.visibility=View.VISIBLE; pairStatus.text=message } }
 
     private fun identity(): Triple<String,ByteArray,ByteArray> {
@@ -106,7 +123,7 @@ class MainActivity : AppCompatActivity() {
             override fun onMessage(w:WebSocket,text:String){ try {
                 val m=JSONObject(text); when(m.optString("type")){
                     "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
-                    "ready"->{ runOnUiThread { endConversation.text="END" }; setVoiceState("LISTENING"); startMic() }
+                    "ready"->{ runOnUiThread { endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE }; setVoiceState("LISTENING"); startMic() }
                     "status"->{ val st=m.optString("state").uppercase(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
                     "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")); if(m.optString("speaker")=="jarvis") setVoiceState("LISTENING") }
                     "capability.call"->executeCapability(w,m)
@@ -114,7 +131,7 @@ class MainActivity : AppCompatActivity() {
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
             override fun onMessage(w:WebSocket,bytes:ByteString){ setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
             override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else setEnded() }
-            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.text="START" } }
+            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE } }
         })
     }
 
@@ -147,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
     }}
     private fun endVoice(){ stopMic(); try{player?.pause();player?.flush()}catch(_:Exception){}; ws?.close(1000,"conversation ended"); ws=null; setEnded() }
-    private fun setEnded()=runOnUiThread { status.text="Conversation ended"; orb.state="SLEEPING"; endConversation.text="START" }
+    private fun setEnded()=runOnUiThread { status.text="Conversation ended"; orb.state="SLEEPING"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }
     private fun pcmLevel(b:ByteArray,n:Int):Float { if(n<2)return 0f; var sum=0.0; var count=0; var i=0; while(i+1<n){ val v=((b[i+1].toInt() shl 8) or (b[i].toInt() and 255)).toShort().toInt(); sum+=v.toDouble()*v;count++;i+=2 }; if(count==0)return 0f; return (sqrt(sum/count)/3500.0).toFloat().coerceIn(0f,1f) }
 
     private fun executeCapability(w:WebSocket,m:JSONObject){ val cap=m.optString("capability"); val a=m.optJSONObject("args")?:JSONObject(); var ok=true; var result="done"; try { when(cap){
@@ -155,8 +172,8 @@ class MainActivity : AppCompatActivity() {
         "vibration"->{ val v=if(Build.VERSION.SDK_INT>=31)getSystemService(VibratorManager::class.java).defaultVibrator else @Suppress("DEPRECATION") getSystemService(VIBRATOR_SERVICE) as Vibrator; v.vibrate(VibrationEffect.createOneShot(a.optLong("ms",300),VibrationEffect.DEFAULT_AMPLITUDE)) }
         "clipboard.write"->{ (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("JARVIS",a.optString("text"))) }
         "open_url"->{ startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(a.getString("url"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        "app.launch"->{ val pkg=a.getString("package"); val i=packageManager.getLaunchIntentForPackage(pkg)?:error("App not installed: $pkg"); startActivity(i) }
-        "android.settings.open"->{ startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        "app.launch"->{ val query=a.optString("package").ifBlank { a.optString("app") }.ifBlank { a.optString("name") }; val pkg=resolveAppPackage(query)?:error("App not found: $query"); val i=packageManager.getLaunchIntentForPackage(pkg)?:error("App has no launch activity: $pkg"); startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); result="opened $pkg" }
+        "android.settings.open"->{ val page=a.optString("page").ifBlank { a.optString("section") }; startActivity(settingsIntent(page)); result=if(page.isBlank()) "opened Android Settings" else "opened Android Settings: $page" }
         "android.ui.inspect"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.inspect(a.optInt("max_nodes",120)).toString() }
         "android.ui.click"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.click(a.optString("text"),a.optString("view_id")) }
         "android.ui.text"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.setText(a.getString("text"),a.optString("target_text"),a.optString("view_id")) }
@@ -164,6 +181,36 @@ class MainActivity : AppCompatActivity() {
         "android.ui.global"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.global(a.getString("action")) }
         else->{ok=false;result="Unsupported capability: $cap"}
     }}catch(e:Exception){ok=false;result=e.message?:e.toString()}; w.send(JSONObject().put("type","capability.result").put("call_id",m.optString("call_id")).put("ok",ok).put("result",result).toString()) }
+
+    private fun normalizeName(s:String)=s.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]"), "")
+    private fun resolveAppPackage(query:String):String? {
+        if(query.isBlank()) return null
+        packageManager.getLaunchIntentForPackage(query)?.let { return query }
+        val q=normalizeName(query)
+        val aliases=mapOf("whatsapp" to "com.whatsapp", "wa" to "com.whatsapp", "youtube" to "com.google.android.youtube", "chrome" to "com.android.chrome", "gmail" to "com.google.android.gm", "maps" to "com.google.android.apps.maps", "googlemaps" to "com.google.android.apps.maps")
+        aliases[q]?.let { if(packageManager.getLaunchIntentForPackage(it)!=null) return it }
+        val apps=if(Build.VERSION.SDK_INT>=33) packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0)) else @Suppress("DEPRECATION") packageManager.getInstalledApplications(0)
+        return apps.asSequence().map { it to packageManager.getApplicationLabel(it).toString() }.filter { packageManager.getLaunchIntentForPackage(it.first.packageName)!=null }.sortedByDescending { val n=normalizeName(it.second); when { n==q -> 3; n.contains(q)||q.contains(n) -> 2; normalizeName(it.first.packageName).contains(q) -> 1; else -> 0 } }.firstOrNull { val n=normalizeName(it.second); n==q || n.contains(q) || q.contains(n) || normalizeName(it.first.packageName).contains(q) }?.first?.packageName
+    }
+    private fun settingsIntent(raw:String):Intent {
+        val p=normalizeName(raw)
+        val action=when {
+            p.contains("bluetooth") -> Settings.ACTION_BLUETOOTH_SETTINGS
+            p.contains("wifi") || p.contains("wireless") -> Settings.ACTION_WIFI_SETTINGS
+            p.contains("accessibility") -> Settings.ACTION_ACCESSIBILITY_SETTINGS
+            p.contains("notification") -> Settings.ACTION_NOTIFICATION_SETTINGS
+            p.contains("display") || p.contains("screen") -> Settings.ACTION_DISPLAY_SETTINGS
+            p.contains("sound") || p.contains("audio") -> Settings.ACTION_SOUND_SETTINGS
+            p.contains("location") -> Settings.ACTION_LOCATION_SOURCE_SETTINGS
+            p.contains("security") -> Settings.ACTION_SECURITY_SETTINGS
+            p.contains("application") || p=="apps" || p=="app" -> Settings.ACTION_APPLICATION_SETTINGS
+            p.contains("battery") -> Settings.ACTION_BATTERY_SAVER_SETTINGS
+            p.contains("date") || p.contains("time") -> Settings.ACTION_DATE_SETTINGS
+            p.contains("language") || p.contains("keyboard") -> Settings.ACTION_INPUT_METHOD_SETTINGS
+            else -> Settings.ACTION_SETTINGS
+        }
+        return Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
 
     override fun onDestroy(){ stopMic(); try{player?.stop()}catch(_:Exception){}; player?.release(); player=null; ws?.close(1000,"activity closed"); super.onDestroy() }
     private fun ui(s:String)=runOnUiThread{status.text=s}
