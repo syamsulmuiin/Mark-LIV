@@ -24,6 +24,7 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.*
 import java.util.concurrent.TimeUnit
+import kotlin.math.sqrt
 import javax.net.ssl.*
 
 class MainActivity : AppCompatActivity() {
@@ -32,6 +33,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pairCode: EditText
     private lateinit var pairPanel: View
     private lateinit var voicePanel: View
+    private lateinit var orb: JarvisOrbView
+    private lateinit var transcript: TextView
+    private lateinit var transcriptScroll: ScrollView
+    private lateinit var endConversation: Button
     private var ws: WebSocket? = null
     private var recorder: AudioRecord? = null
     private var player: AudioTrack? = null
@@ -45,14 +50,17 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode)
         pairPanel=findViewById(R.id.pairPanel); voicePanel=findViewById(R.id.voicePanel)
+        orb=findViewById(R.id.orb); transcript=findViewById(R.id.transcript); transcriptScroll=findViewById(R.id.transcriptScroll); endConversation=findViewById(R.id.endConversation)
         findViewById<Button>(R.id.pair).setOnClickListener { pairWithCode(pairCode.text.toString()) }
+        findViewById<Button>(R.id.interrupt).setOnClickListener { ws?.send(JSONObject().put("type","jarvis.interrupt").toString()) }
+        endConversation.setOnClickListener { if(micRunning || ws != null) endVoice() else connect() }
         findViewById<Button>(R.id.accessibility).setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         if (Build.VERSION.SDK_INT>=33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
         intent?.data?.getQueryParameter("code")?.let { pairCode.setText(it.uppercase()); pairWithCode(it) }
         if (intent?.data==null && prefs.getBoolean("paired", false)) { showVoice(); connect() }
     }
 
-    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text="Connecting..." } }
+    private fun showVoice(){ runOnUiThread { pairPanel.visibility=View.GONE; voicePanel.visibility=View.VISIBLE; status.text="Connecting..."; orb.state="CONNECTING"; endConversation.text="END" } }
     private fun showPair(message:String){ stopMic(); runOnUiThread { voicePanel.visibility=View.GONE; pairPanel.visibility=View.VISIBLE; pairStatus.text=message } }
 
     private fun identity(): Triple<String,ByteArray,ByteArray> {
@@ -98,13 +106,15 @@ class MainActivity : AppCompatActivity() {
             override fun onMessage(w:WebSocket,text:String){ try {
                 val m=JSONObject(text); when(m.optString("type")){
                     "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
-                    "ready"->{ ui("Listening"); startMic() }
+                    "ready"->{ runOnUiThread { endConversation.text="END" }; setVoiceState("LISTENING"); startMic() }
+                    "status"->{ val st=m.optString("state").uppercase(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
+                    "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")); if(m.optString("speaker")=="jarvis") setVoiceState("LISTENING") }
                     "capability.call"->executeCapability(w,m)
                 }
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
-            override fun onMessage(w:WebSocket,bytes:ByteString){ playAudio(bytes.toByteArray()) }
-            override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else ui("Disconnected") }
-            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ui("Disconnected: ${t.message}") }
+            override fun onMessage(w:WebSocket,bytes:ByteString){ setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
+            override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else setEnded() }
+            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.text="START" } }
         })
     }
 
@@ -116,17 +126,29 @@ class MainActivity : AppCompatActivity() {
         recorder?.startRecording(); micRunning=true
         Thread {
             val buf=ByteArray(1024)
-            while(micRunning){ val n=try{recorder?.read(buf,0,buf.size)?:-1}catch(_:Exception){-1}; if(n>0) ws?.send(ByteString.of(*buf.copyOf(n))) }
+            while(micRunning){ val n=try{recorder?.read(buf,0,buf.size)?:-1}catch(_:Exception){-1}; if(n>0){ orb.audioLevel(pcmLevel(buf,n)); ws?.send(ByteString.of(*buf.copyOf(n))) } }
         }.apply { name="JarvisPhoneMic"; isDaemon=true; start() }
     }
     private fun stopMic(){ micRunning=false; try{recorder?.stop()}catch(_:Exception){}; recorder?.release(); recorder=null }
     private fun playAudio(pcm:ByteArray){
+        orb.audioLevel(pcmLevel(pcm,pcm.size))
         try {
             if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack(AudioManager.STREAM_MUSIC,24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2,AudioTrack.MODE_STREAM); player?.play() }
             player?.write(pcm,0,pcm.size)
         } catch(_:Exception){}
     }
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){ super.onRequestPermissionsResult(requestCode,permissions,grantResults); if(requestCode==42){ if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) startMic() else ui("Microphone permission is required for Live Voice") } }
+
+    private fun setVoiceState(s:String)=runOnUiThread { status.text=s.lowercase().replaceFirstChar { it.uppercase() }; orb.state=s }
+    private fun appendTranscript(speaker:String,text:String){ if(text.isBlank()) return; runOnUiThread {
+        val who=if(speaker.equals("user",true)) "YOU" else "JARVIS"
+        if(transcript.text.isNotEmpty()) transcript.append("\n\n")
+        transcript.append("$who  $text")
+        transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
+    }}
+    private fun endVoice(){ stopMic(); try{player?.pause();player?.flush()}catch(_:Exception){}; ws?.close(1000,"conversation ended"); ws=null; setEnded() }
+    private fun setEnded()=runOnUiThread { status.text="Conversation ended"; orb.state="SLEEPING"; endConversation.text="START" }
+    private fun pcmLevel(b:ByteArray,n:Int):Float { if(n<2)return 0f; var sum=0.0; var count=0; var i=0; while(i+1<n){ val v=((b[i+1].toInt() shl 8) or (b[i].toInt() and 255)).toShort().toInt(); sum+=v.toDouble()*v;count++;i+=2 }; if(count==0)return 0f; return (sqrt(sum/count)/3500.0).toFloat().coerceIn(0f,1f) }
 
     private fun executeCapability(w:WebSocket,m:JSONObject){ val cap=m.optString("capability"); val a=m.optJSONObject("args")?:JSONObject(); var ok=true; var result="done"; try { when(cap){
         "notification"->{ val nm=getSystemService(NotificationManager::class.java); val cid="jarvis"; if(Build.VERSION.SDK_INT>=26)nm.createNotificationChannel(NotificationChannel(cid,"JARVIS",NotificationManager.IMPORTANCE_DEFAULT)); nm.notify((System.currentTimeMillis()%Int.MAX_VALUE).toInt(),Notification.Builder(this,cid).setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("JARVIS").setContentText(a.optString("text")).build()) }

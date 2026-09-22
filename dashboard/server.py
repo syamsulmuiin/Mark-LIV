@@ -468,6 +468,7 @@ class DashboardServer:
         self._command_queue               = asyncio.Queue()
         self._wake_callback               = None
         self._connect_callback            = None
+        self._interrupt_callback          = None
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # legacy browser sessions
         self._mesh                         = DeviceMesh(BASE_DIR)
@@ -560,6 +561,9 @@ class DashboardServer:
     def set_connect_callback(self, fn) -> None:
         self._connect_callback = fn
 
+    def set_interrupt_callback(self, fn) -> None:
+        self._interrupt_callback = fn
+
     # ── broadcast ────────────────────────────────────────────────────────
 
     async def broadcast(self, msg: dict) -> None:
@@ -573,6 +577,17 @@ class DashboardServer:
             except Exception:
                 dead.add(ws)
         self._clients -= dead
+        # Trusted companion devices share the same live conversation surface as
+        # the browser dashboard: state and transcript are pushed over their
+        # already-authenticated device socket. Binary frames remain audio only.
+        dead_devices = []
+        for device_id, ws in list(self._device_sockets.items()):
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                dead_devices.append(device_id)
+        for device_id in dead_devices:
+            self._device_sockets.pop(device_id, None)
 
     async def send_device_audio(self, pcm: bytes) -> None:
         """Mirror JARVIS 24 kHz mono PCM output to connected trusted devices."""
@@ -822,6 +837,11 @@ class DashboardServer:
                         if text:
                             await self._command_queue.put(text)
                             if self._wake_callback: self._wake_callback()
+                    elif msg.get("type") == "jarvis.interrupt":
+                        # Same interruption path as the desktop keyboard/UI: stop
+                        # the current answer immediately and reopen listening.
+                        if self._interrupt_callback:
+                            self._interrupt_callback()
                     elif msg.get("type") == "capability.result":
                         call_id = str(msg.get("call_id") or "")
                         fut = self._device_pending_calls.pop(call_id, None)

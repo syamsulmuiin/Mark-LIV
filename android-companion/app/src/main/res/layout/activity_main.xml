@@ -27,14 +27,21 @@
         <TextView android:text="LIVE" android:textColor="#777E93" android:textSize="10sp" android:letterSpacing="0.18"
             android:layout_marginTop="4dp" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <ImageView android:id="@+id/orb" android:layout_width="190dp" android:layout_height="190dp"
-            android:src="@drawable/orb" android:contentDescription="JARVIS voice orb" android:elevation="16dp"/>
+        <com.jarvis.companion.JarvisOrbView android:id="@+id/orb" android:layout_width="match_parent" android:layout_height="280dp"
+            android:contentDescription="JARVIS live reactor orb"/>
         <TextView android:id="@+id/status" android:text="Connecting..." android:textColor="#C9CDDC" android:textSize="16sp"
             android:gravity="center" android:layout_marginTop="28dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
         <TextView android:text="Speak naturally" android:textColor="#5F667A" android:textSize="12sp" android:gravity="center"
             android:layout_marginTop="8dp" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <Button android:id="@+id/accessibility" android:text="ENABLE PHONE CONTROL" android:textColor="#C7CAD7"
+        <ScrollView android:id="@+id/transcriptScroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="18dp" android:fillViewport="true">
+            <TextView android:id="@+id/transcript" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="#C9CDDC" android:textSize="13sp" android:lineSpacingExtra="5dp" android:padding="8dp"/>
+        </ScrollView>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="10dp">
+            <Button android:id="@+id/interrupt" android:text="INTERRUPT" android:textColor="#C7CAD7" android:background="@drawable/bg_button_secondary" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"/>
+            <Space android:layout_width="8dp" android:layout_height="1dp"/>
+            <Button android:id="@+id/endConversation" android:text="END" android:textColor="#FFFFFF" android:background="@drawable/bg_button" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp"/>
+        </LinearLayout>
+        <Button android:id="@+id/accessibility" android:layout_marginTop="8dp" android:text="ENABLE PHONE CONTROL" android:textColor="#C7CAD7"
             android:background="@drawable/bg_button_secondary" android:layout_width="match_parent" android:layout_height="50dp"/>
     </LinearLayout>
 </FrameLayout>

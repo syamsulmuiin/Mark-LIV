@@ -2143,6 +2143,7 @@ class JarvisLive:
             from dashboard.server import DashboardServer
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
+            self._dashboard.set_interrupt_callback(self.interrupt)
             asyncio.create_task(self._dashboard.serve())
             # Pairing is a core/device-mesh feature, not a Qt feature. Make a
             # fresh offer available in CLI/background as soon as the transport starts.
@@ -2387,7 +2388,22 @@ def main(argv=None):
             except KeyboardInterrupt:
                 print("\n🔴 Shutting down...")
         threading.Thread(target=runner, daemon=True).start()
-        ui.root.mainloop()
+        # Python only dispatches SIGINT on the main thread. Qt can otherwise
+        # keep that thread inside its native event loop forever, making Ctrl+C
+        # look ignored. A tiny Qt timer returns to Python regularly so the
+        # KeyboardInterrupt is delivered without changing the UI/runtime model.
+        try:
+            from PyQt6.QtCore import QTimer
+            _sigint_timer = QTimer()
+            _sigint_timer.timeout.connect(lambda: None)
+            _sigint_timer.start(100)
+            ui.root.mainloop()
+        except KeyboardInterrupt:
+            print("\n🔴 Shutting down...")
+            try:
+                ui._app.quit()
+            except Exception:
+                pass
         return
 
     from core.interfaces import HeadlessInterface
