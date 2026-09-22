@@ -76,3 +76,10 @@ Pairing establishes identity, not blanket permission. A trusted device can only 
 - The token is stored only in git-ignored `config/remote_access.json` (or can be supplied with `JARVIS_CLOUDFLARE_TUNNEL_TOKEN`).
 - Cloudflare dashboard Public Hostname must map `auth.kasirdigital.web.id` to `http://localhost:8000`.
 - JARVIS device pairing and capability authorization remain independent from Cloudflare transport.
+
+## 2026-09-22 Cloudflare 502 + Android companion stability/UI
+- Port 8000 is now always HTTP so Cloudflare Public Hostname service `http://127.0.0.1:8000` matches the JARVIS origin protocol. Public `auth.kasirdigital.web.id` remains HTTPS at Cloudflare edge.
+- Existing self-signed LAN HTTPS is retained on port 8001.
+- Android pairing now handles HTTP/502/non-JSON responses without crashing.
+- Android WebSocket message parsing is guarded against malformed payloads.
+- Android companion UI redesigned around the compact dark JARVIS/Hermes-style orb layout while retaining Pair Code, command, Accessibility and all existing native capabilities.

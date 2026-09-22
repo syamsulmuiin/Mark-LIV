@@ -510,8 +510,11 @@ class DashboardServer:
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
-        proto = "https" if self._ssl_enabled() else "http"
-        return f"{proto}://{self._ip}:{PORT}"
+        # Port 8000 is intentionally plain HTTP. Cloudflare terminates public
+        # TLS and forwards to http://127.0.0.1:8000. Keeping the origin HTTP
+        # avoids a protocol mismatch/502 when the tunnel Public Hostname is
+        # configured with service HTTP, as intended by setup.
+        return f"http://{self._ip}:{PORT}"
 
     def get_remote_url(self) -> str:
         """Stable public endpoint when Cloudflare remote access is configured."""
@@ -1005,22 +1008,18 @@ class DashboardServer:
         # no waiting for UAC dialogs or subprocess timeouts.
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
 
-        # Generate the TLS pair on first run so no private key ships in the repo.
+        # Cloudflare Public Hostname is configured as HTTP -> 127.0.0.1:8000.
+        # Therefore port 8000 MUST stay HTTP. Public traffic is still HTTPS
+        # because TLS terminates at Cloudflare. Keep the self-signed HTTPS LAN
+        # alias on 8001 for clients that explicitly want local TLS.
         _ensure_certs()
-
-        use_ssl  = self._ssl_enabled()
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-
-        if use_ssl:
+        if self._ssl_enabled():
             asyncio.create_task(self._serve_alias())
 
         cfg = uvicorn.Config(
-            self.app, host="0.0.0.0", port=PORT, log_level="warning",
-            **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)} if use_ssl else {}),
+            self.app, host="0.0.0.0", port=PORT, log_level="warning"
         )
 
-        proto = "https" if use_ssl else "http"
-        print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
+        print(f"[Dashboard] http://{self._ip}:{PORT}")
         print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
         await uvicorn.Server(cfg).serve()

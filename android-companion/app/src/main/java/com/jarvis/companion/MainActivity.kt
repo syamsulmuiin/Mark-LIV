@@ -60,11 +60,17 @@ class MainActivity : AppCompatActivity() {
         client.newCall(offerReq).enqueue(object:Callback{
             override fun onFailure(c:Call,e:java.io.IOException)=ui("Pairing failed: ${e.message}")
             override fun onResponse(c:Call,r:Response){
-                val o=JSONObject(r.body?.string()?:"{}")
-                val nonce=o.optString("nonce")
-                val serverKey=o.optString("public_key")
-                val serverId=o.optString("device_id")
-                if(!r.isSuccessful || nonce.isBlank() || serverKey.isBlank() || serverId.isBlank()){ui("Pairing code invalid or expired");return}
+                r.use { response ->
+                    if(!response.isSuccessful){
+                        ui(if(response.code == 502) "JARVIS tunnel is offline (502)" else "Pairing server error: ${response.code}")
+                        return
+                    }
+                    val raw=response.body?.string().orEmpty()
+                    val o=try { JSONObject(raw) } catch(_:Exception) { ui("Invalid response from JARVIS"); return }
+                    val nonce=o.optString("nonce")
+                    val serverKey=o.optString("public_key")
+                    val serverId=o.optString("device_id")
+                    if(nonce.isBlank() || serverKey.isBlank() || serverId.isBlank()){ui("Pairing code invalid or expired");return}
                 val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global"))
                 val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
                 val req=Request.Builder().url("$server/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
@@ -77,17 +83,23 @@ class MainActivity : AppCompatActivity() {
                         connect()
                     }
                 })
+                }
             }
         })
     }
 
     private fun connect(){ val server=prefs.getString("server",null)?:return; val id=identity().first; val wsBase=server.replaceFirst("https://","wss://").replaceFirst("http://","ws://")
         ws=client.newWebSocket(Request.Builder().url("$wsBase/ws/device?device_id=$id").build(),object:WebSocketListener(){
-            override fun onMessage(w:WebSocket,text:String){ val m=JSONObject(text); when(m.optString("type")){
-                "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; val serverId=prefs.getString("server_id","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
-                "ready"->ui("Paired and connected to JARVIS")
-                "capability.call"->executeCapability(w,m)
-            }}
+            override fun onMessage(w:WebSocket,text:String){
+                try {
+                    val m=JSONObject(text)
+                    when(m.optString("type")){
+                        "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
+                        "ready"->ui("Connected")
+                        "capability.call"->executeCapability(w,m)
+                    }
+                } catch(e:Exception) { ui("Invalid message from JARVIS") }
+            }
             override fun onClosing(w:WebSocket,code:Int,reason:String){
                 if(code==4001 || code==4003){
                     prefs.edit().putBoolean("paired",false).apply()
