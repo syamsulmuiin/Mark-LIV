@@ -20,7 +20,7 @@
             android:background="@drawable/bg_card" android:padding="16dp" android:layout_marginTop="24dp">
             <TextView android:text="PAIR DEVICE" android:textColor="#8D93A8" android:textStyle="bold" android:textSize="11sp"
                 android:letterSpacing="0.12" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <EditText android:id="@+id/pairCode" android:hint="6-character Pair Code" android:hintTextColor="#555D72"
+            <EditText android:id="@+id/pairCode" android:hint="6-character Pair Code"
                 android:textColor="#FFFFFF" android:textColorHint="#555D72" android:textSize="18sp" android:gravity="center"
                 android:letterSpacing="0.20" android:inputType="textCapCharacters" android:maxLength="6" android:singleLine="true"
                 android:background="@drawable/bg_input" android:layout_marginTop="12dp" android:layout_width="match_parent" android:layout_height="54dp"/>
@@ -32,7 +32,7 @@
             android:background="@drawable/bg_card" android:padding="16dp" android:layout_marginTop="14dp">
             <TextView android:text="COMMAND" android:textColor="#8D93A8" android:textStyle="bold" android:textSize="11sp"
                 android:letterSpacing="0.12" android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-            <EditText android:id="@+id/command" android:hint="Ask JARVIS..." android:hintTextColor="#555D72" android:textColor="#FFFFFF"
+            <EditText android:id="@+id/command" android:hint="Ask JARVIS..." android:textColor="#FFFFFF"
                 android:background="@drawable/bg_input" android:singleLine="true" android:layout_marginTop="12dp"
                 android:layout_width="match_parent" android:layout_height="54dp"/>
             <Button android:id="@+id/send" android:text="SEND COMMAND" android:textColor="#FFFFFF" android:textStyle="bold"
