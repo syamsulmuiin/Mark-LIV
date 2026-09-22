@@ -38,7 +38,7 @@ except Exception:
 
 BASE_DIR    = Path(__file__).resolve().parent.parent
 from core.device_mesh import DeviceMesh
-from core.cloudflare_tunnel import NamedTunnel, enabled as cloudflare_enabled
+from core.cloudflare_tunnel import NamedTunnel, enabled as cloudflare_enabled, public_url as cloudflare_public_url
 STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000
 MAX_UPLOAD_MB = 500
@@ -514,8 +514,10 @@ class DashboardServer:
         return f"{proto}://{self._ip}:{PORT}"
 
     def get_remote_url(self) -> str:
-        """Public tunnel URL when enabled, otherwise the normal LAN URL."""
-        return self._public_url or self.get_url()
+        """Stable public endpoint when Cloudflare remote access is configured."""
+        if cloudflare_enabled():
+            return self._public_url or cloudflare_public_url()
+        return self.get_url()
 
     async def _start_remote_tunnel(self) -> None:
         if not cloudflare_enabled():

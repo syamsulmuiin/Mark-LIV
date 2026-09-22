@@ -21,20 +21,25 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.*
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var status: TextView; private lateinit var pairUrl: EditText; private lateinit var command: EditText
+    private lateinit var status: TextView; private lateinit var pairCode: EditText; private lateinit var command: EditText
     private var ws: WebSocket? = null
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
+    private val serverBase = "https://auth.kasirdigital.web.id"
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state); setContentView(R.layout.activity_main)
-        status=findViewById(R.id.status); pairUrl=findViewById(R.id.pairUrl); command=findViewById(R.id.command)
-        findViewById<Button>(R.id.pair).setOnClickListener { pairOrConnect(pairUrl.text.toString()) }
+        status=findViewById(R.id.status); pairCode=findViewById(R.id.pairCode); command=findViewById(R.id.command)
+        findViewById<Button>(R.id.pair).setOnClickListener { pairWithCode(pairCode.text.toString()) }
         findViewById<Button>(R.id.send).setOnClickListener { ws?.send(JSONObject().put("type","jarvis.command").put("text",command.text.toString()).toString()) }
         findViewById<Button>(R.id.accessibility).setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         if (Build.VERSION.SDK_INT>=33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
-        intent?.data?.let { pairUrl.setText(it.toString()); pairOrConnect(it.toString()) }
-        if (intent?.data==null && prefs.contains("server")) connect()
+        intent?.data?.getQueryParameter("code")?.let { pairCode.setText(it.uppercase()); pairWithCode(it) }
+        if (intent?.data==null && prefs.getBoolean("paired", false)) {
+            pairCode.visibility = android.view.View.GONE
+            findViewById<Button>(R.id.pair).visibility = android.view.View.GONE
+            connect()
+        }
     }
 
     private fun identity(): Triple<String,ByteArray,ByteArray> {
@@ -45,25 +50,35 @@ class MainActivity : AppCompatActivity() {
     private fun sign(data:ByteArray):String { val p=Ed25519PrivateKeyParameters(identity().second,0); val s=Ed25519Signer(); s.init(true,p); s.update(data,0,data.size); return b64(s.generateSignature()) }
     private fun verify(pub:String,data:ByteArray,sig:String):Boolean = try { val v=Ed25519Signer(); v.init(false,Ed25519PublicKeyParameters(unb64(pub),0)); v.update(data,0,data.size); v.verifySignature(unb64(sig)) } catch(_:Exception){false}
 
-    private fun pairOrConnect(raw:String) {
-        try {
-            val u=Uri.parse(raw); val server=if(u.scheme=="jarvis") u.getQueryParameter("server") else "${u.scheme}://${u.authority}"
-            val code=u.getQueryParameter("code")?.uppercase() ?: error("Missing pairing code")
-            val serverKey=u.getQueryParameter("server_key") ?: error("QR is missing JARVIS trust key; create a fresh QR")
-            val serverId=u.getQueryParameter("server_id") ?: ""
-            prefs.edit().putString("server",server).putString("server_key",serverKey).putString("server_id",serverId).apply()
-            val ident=identity(); val peer=JSONObject().put("device_id",ident.first).put("name",Build.MODEL).put("public_key",b64(ident.third))
-            val offerReq=Request.Builder().url("$server/api/pairing/offer/$code").build()
-            client.newCall(offerReq).enqueue(object:Callback{
-                override fun onFailure(c:Call,e:java.io.IOException)=ui("Pairing failed: ${e.message}")
-                override fun onResponse(c:Call,r:Response){ val o=JSONObject(r.body?.string()?:"{}"); val nonce=o.optString("nonce"); if(nonce.isBlank()){ui("Pairing code expired");return}
-                    val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global"))
-                    val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
-                    val req=Request.Builder().url("$server/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
-                    client.newCall(req).enqueue(object:Callback{override fun onFailure(c:Call,e:java.io.IOException)=ui("Pair failed: ${e.message}"); override fun onResponse(c:Call,r:Response){ if(!r.isSuccessful){ui("Pair rejected: ${r.code}");return}; prefs.edit().putBoolean("paired",true).apply(); connect() }})
-                }
-            })
-        } catch(e:Exception){ ui(e.message?:"Invalid pairing URL") }
+    private fun pairWithCode(rawCode:String) {
+        val code=rawCode.trim().uppercase()
+        if(code.length != 6){ ui("Enter the 6-character Pair Code shown by JARVIS"); return }
+        val server=serverBase
+        val ident=identity()
+        val peer=JSONObject().put("device_id",ident.first).put("name",Build.MODEL).put("public_key",b64(ident.third))
+        val offerReq=Request.Builder().url("$server/api/pairing/offer/$code").build()
+        client.newCall(offerReq).enqueue(object:Callback{
+            override fun onFailure(c:Call,e:java.io.IOException)=ui("Pairing failed: ${e.message}")
+            override fun onResponse(c:Call,r:Response){
+                val o=JSONObject(r.body?.string()?:"{}")
+                val nonce=o.optString("nonce")
+                val serverKey=o.optString("public_key")
+                val serverId=o.optString("device_id")
+                if(!r.isSuccessful || nonce.isBlank() || serverKey.isBlank() || serverId.isBlank()){ui("Pairing code invalid or expired");return}
+                val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global"))
+                val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
+                val req=Request.Builder().url("$server/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
+                client.newCall(req).enqueue(object:Callback{
+                    override fun onFailure(c:Call,e:java.io.IOException)=ui("Pair failed: ${e.message}")
+                    override fun onResponse(c:Call,r:Response){
+                        if(!r.isSuccessful){ui("Pair rejected: ${r.code}");return}
+                        prefs.edit().putString("server",server).putString("server_key",serverKey).putString("server_id",serverId).putBoolean("paired",true).apply()
+                        runOnUiThread { pairCode.visibility=android.view.View.GONE; findViewById<Button>(R.id.pair).visibility=android.view.View.GONE }
+                        connect()
+                    }
+                })
+            }
+        })
     }
 
     private fun connect(){ val server=prefs.getString("server",null)?:return; val id=identity().first; val wsBase=server.replaceFirst("https://","wss://").replaceFirst("http://","ws://")
@@ -73,6 +88,13 @@ class MainActivity : AppCompatActivity() {
                 "ready"->ui("Paired and connected to JARVIS")
                 "capability.call"->executeCapability(w,m)
             }}
+            override fun onClosing(w:WebSocket,code:Int,reason:String){
+                if(code==4001 || code==4003){
+                    prefs.edit().putBoolean("paired",false).apply()
+                    runOnUiThread { pairCode.visibility=android.view.View.VISIBLE; findViewById<Button>(R.id.pair).visibility=android.view.View.VISIBLE }
+                    ui("Pairing revoked or no longer trusted. Enter a new Pair Code.")
+                }
+            }
             override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ui("Disconnected: ${t.message}")}
         }) }
 
