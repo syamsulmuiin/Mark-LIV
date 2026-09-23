@@ -2290,7 +2290,7 @@ def _is_markliv_worker(pid):
     try:
         if sys.platform == "win32":
             ps = (
-                f"$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId={int(pid)}\\\" -ErrorAction SilentlyContinue; "
+                f"$p=Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}' -ErrorAction SilentlyContinue; "
                 "$p.CommandLine"
             )
             r = _subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=5)
@@ -2314,19 +2314,18 @@ def _server_pid():
     return None
 
 def _local_server_ready(timeout=0.8):
+    """Return True as soon as the local MARK-LIV HTTP listener accepts TCP.
+
+    Readiness must not depend on a particular HTTP route: the headless server
+    intentionally rejects browser/control routes, and that policy can change
+    independently of process lifecycle.
+    """
+    import socket as _socket
     try:
-        import urllib.request as _ur
-        # Any HTTP response proves that something owns MARK-LIV's HTTP listener;
-        # pairing itself remains protected by the local-only header.
-        with _ur.urlopen("http://127.0.0.1:8000/", timeout=timeout) as r:
+        with _socket.create_connection(("127.0.0.1", 8000), timeout=timeout):
             return True
-    except Exception as exc:
-        # HTTPError still means the listener is alive.
-        try:
-            import urllib.error as _ue
-            return isinstance(exc, _ue.HTTPError)
-        except Exception:
-            return False
+    except OSError:
+        return False
 
 def _spawn_server():
     import time as _time
