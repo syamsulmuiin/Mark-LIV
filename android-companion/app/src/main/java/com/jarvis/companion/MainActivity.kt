@@ -24,10 +24,6 @@ import org.json.JSONObject
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.*
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
 import javax.net.ssl.*
@@ -47,12 +43,10 @@ class MainActivity : AppCompatActivity() {
     private var ws: WebSocket? = null
     private var recorder: AudioRecord? = null
     private var player: AudioTrack? = null
-    @Volatile private var micGeneration = 0L
-    private val micLock = Any()
     @Volatile private var micRunning = false
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
-    private val serverBase: String get() = prefs.getString("server", "") ?: ""
+    private val serverBase: String get() = prefs.getString("server", "https://auth.kasirdigital.web.id") ?: "https://auth.kasirdigital.web.id"
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -99,27 +93,7 @@ class MainActivity : AppCompatActivity() {
         val code=rawCode.trim().uppercase()
         if(code.length != 6){ pairStatus.text=getString(R.string.pair_code_help); return }
         pairStatus.text=getString(R.string.pairing)
-        Thread {
-            val discovered = try { discoverServer(code) } catch(e:Exception) { pairUi("Pairing failed: ${e.message}"); return@Thread }
-            pairAgainstServer(code, discovered)
-        }.start()
-    }
-
-    private fun discoverServer(code:String):String {
-        val payload=JSONObject().put("magic","MARKLIV_DISCOVER_V1").put("code",code).toString().toByteArray()
-        DatagramSocket().use { sock ->
-            sock.broadcast=true; sock.soTimeout=700
-            val deadline=System.currentTimeMillis()+5000
-            while(System.currentTimeMillis()<deadline){
-                sock.send(DatagramPacket(payload,payload.size,InetAddress.getByName("255.255.255.255"),37991))
-                try {
-                    val buf=ByteArray(4096); val packet=DatagramPacket(buf,buf.size); sock.receive(packet)
-                    val r=JSONObject(String(packet.data,0,packet.length))
-                    if(r.optString("magic")=="MARKLIV_DISCOVER_V1" && r.optString("code")==code) return r.getString("server").trimEnd('/')
-                } catch(_:SocketTimeoutException) {}
-            }
-        }
-        throw java.io.IOException("Server with this Pair Code was not found on the local network")
+        pairAgainstServer(code, "https://auth.kasirdigital.web.id")
     }
 
     private fun pairAgainstServer(code:String, base:String) {
@@ -155,12 +129,12 @@ class MainActivity : AppCompatActivity() {
                 val m=JSONObject(text); when(m.optString("type")){
                     "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
                     "ready"->{ runOnUiThread { endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE }; setVoiceState("LISTENING"); startMic() }
-                    "status"->{ val st=m.optString("state").uppercase(); if(st=="SPEAKING") stopMic() else if(st=="LISTENING"||st=="ACTIVE") startMic(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
-                    "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")) }
+                    "status"->{ val st=m.optString("state").uppercase(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
+                    "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")); if(m.optString("speaker")=="jarvis") setVoiceState("LISTENING") }
                     "capability.call"->executeCapability(w,m)
                 }
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
-            override fun onMessage(w:WebSocket,bytes:ByteString){ stopMic(); setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
+            override fun onMessage(w:WebSocket,bytes:ByteString){ setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
             override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else setEnded() }
             override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE } }
         })
@@ -168,44 +142,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun startMic(){
         if(ActivityCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){ ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.RECORD_AUDIO),42); return }
-        val localRecorder: AudioRecord
-        val generation: Long
-        synchronized(micLock){
-            if(micRunning) return
-            val min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(2048)
-            localRecorder=AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2)
-            if(localRecorder.state != AudioRecord.STATE_INITIALIZED){ localRecorder.release(); ui("Microphone initialization failed"); return }
-            generation=++micGeneration
-            recorder=localRecorder
-            try { localRecorder.startRecording() } catch(e:Exception){ recorder=null; localRecorder.release(); ui("Microphone start failed: ${e.message}"); return }
-            micRunning=true
-        }
+        if(micRunning)return
+        val min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(2048)
+        recorder=AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2)
+        recorder?.startRecording(); micRunning=true
         Thread {
             val buf=ByteArray(1024)
-            while(micRunning && generation==micGeneration){
-                val n=try{localRecorder.read(buf,0,buf.size)}catch(_:Exception){-1}
-                if(n>0 && micRunning && generation==micGeneration){ orb.audioLevel(pcmLevel(buf,n)); ws?.send(ByteString.of(*buf.copyOf(n))) }
-            }
-        }.apply { name="JarvisPhoneMic-$generation"; isDaemon=true; start() }
+            while(micRunning){ val n=try{recorder?.read(buf,0,buf.size)?:-1}catch(_:Exception){-1}; if(n>0){ orb.audioLevel(pcmLevel(buf,n)); ws?.send(ByteString.of(*buf.copyOf(n))) } }
+        }.apply { name="JarvisPhoneMic"; isDaemon=true; start() }
     }
-    private fun stopMic(){
-        val old: AudioRecord?
-        synchronized(micLock){
-            if(!micRunning && recorder==null) return
-            micRunning=false
-            ++micGeneration
-            old=recorder
-            recorder=null
-        }
-        try{old?.stop()}catch(_:Exception){}
-        try{old?.release()}catch(_:Exception){}
-    }
+    private fun stopMic(){ micRunning=false; try{recorder?.stop()}catch(_:Exception){}; recorder?.release(); recorder=null }
     private fun playAudio(pcm:ByteArray){
         orb.audioLevel(pcmLevel(pcm,pcm.size))
         try {
-            if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setBufferSizeInBytes(min*2).setTransferMode(AudioTrack.MODE_STREAM).build(); player?.play() }
+            if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack(AudioManager.STREAM_MUSIC,24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2,AudioTrack.MODE_STREAM); player?.play() }
             player?.write(pcm,0,pcm.size)
-        } catch(e:Exception){ ui("Audio playback error: ${e.message}") }
+        } catch(_:Exception){}
     }
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){ super.onRequestPermissionsResult(requestCode,permissions,grantResults); if(requestCode==42){ if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) startMic() else ui("Microphone permission is required for Live Voice") } }
 
