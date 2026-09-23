@@ -83,3 +83,10 @@ Pairing establishes identity, not blanket permission. A trusted device can only 
 - Android pairing now handles HTTP/502/non-JSON responses without crashing.
 - Android WebSocket message parsing is guarded against malformed payloads.
 - Android companion UI redesigned around the compact dark JARVIS/Hermes-style orb layout while retaining Pair Code, command, Accessibility and all existing native capabilities.
+
+## v9 — Android UI click + live-session rollover continuity
+- Android accessibility click canonicalizes escaped view IDs and falls back to an accessibility gesture at the matched node bounds when neither the node nor a parent exposes ACTION_CLICK.
+- Android UI inspection now includes node bounds for more reliable follow-up interaction.
+- A rejected Gemini Live resumption handle no longer discards the active conversation: the in-RAM transcript is injected into the replacement session as rollover context.
+- Transport/session reconnects no longer clear the active transcript by treating every reconnect as an end-of-conversation summary event.
+- Desktop companion voice/capability paths were reviewed for this change; no Android-only UI executor behavior was copied to desktop because desktop does not expose android.ui.* capabilities.

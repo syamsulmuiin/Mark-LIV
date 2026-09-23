@@ -3,6 +3,9 @@ package com.jarvis.companion
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.os.Bundle
+import android.graphics.Path
+import android.graphics.Rect
+import android.accessibilityservice.GestureDescription
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONArray
@@ -45,13 +48,17 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     fun click(text: String, viewId: String = ""): String {
+        // LLM/tool JSON can occasionally preserve JSON's optional escaped slash
+        // (e.g. com.whatsapp:id\/button) as a literal backslash. Android view
+        // resource names never contain that escape, so canonicalise before match.
+        val canonicalViewId = viewId.replace("\\/", "/").trim()
         repeat(3) { attempt ->
             val root = rootInActiveWindow ?: if (attempt < 2) { Thread.sleep(250); return@repeat } else error("No active Android window")
             val all = mutableListOf<AccessibilityNodeInfo>()
             collectNodes(root, all)
             val wanted = normalize(text)
             val candidates = all.filter { n ->
-                (viewId.isNotBlank() && n.viewIdResourceName == viewId) ||
+                (canonicalViewId.isNotBlank() && n.viewIdResourceName == canonicalViewId) ||
                 (wanted.isNotBlank() && (normalize(n.text?.toString().orEmpty()) == wanted || normalize(n.contentDescription?.toString().orEmpty()) == wanted))
             } + all.filter { n ->
                 wanted.isNotBlank() && (normalize(n.text?.toString().orEmpty()).contains(wanted) || normalize(n.contentDescription?.toString().orEmpty()).contains(wanted))
@@ -62,6 +69,12 @@ class JarvisAccessibilityService : AccessibilityService() {
                     if (n.isClickable && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "clicked"
                     n = n.parent
                 }
+                // Some modern apps expose a meaningful accessibility node but mark
+                // neither it nor its parents clickable. Accessibility can still tap
+                // the visible node safely at its screen bounds.
+                val bounds = Rect()
+                target.getBoundsInScreen(bounds)
+                if (!bounds.isEmpty && tap(bounds.centerX().toFloat(), bounds.centerY().toFloat())) return "clicked by bounds"
             }
             if (attempt < 2) Thread.sleep(250)
         }
@@ -102,13 +115,25 @@ class JarvisAccessibilityService : AccessibilityService() {
             if (text.isNotBlank() || desc.isNotBlank() || id.isNotBlank() || n.isClickable || n.isEditable) {
                 arr.put(JSONObject().put("text", text).put("description", desc).put("view_id", id)
                     .put("class", n.className?.toString().orEmpty()).put("clickable", n.isClickable)
-                    .put("editable", n.isEditable).put("scrollable", n.isScrollable).put("depth", depth))
+                    .put("editable", n.isEditable).put("scrollable", n.isScrollable).put("depth", depth).apply {
+                        val b = Rect(); n.getBoundsInScreen(b)
+                        put("bounds", JSONObject().put("left", b.left).put("top", b.top).put("right", b.right).put("bottom", b.bottom))
+                    })
                 count++
             }
             for (i in 0 until n.childCount) n.getChild(i)?.let { walk(it, depth + 1) }
         }
         walk(root, 0)
         return JSONObject().put("package", root.packageName?.toString().orEmpty()).put("nodes", arr)
+    }
+
+    private fun tap(x: Float, y: Float): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 24) return false
+        val path = Path().apply { moveTo(x, y) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 80))
+            .build()
+        return dispatchGesture(gesture, null, null)
     }
 
     private fun normalize(s: String) = s.lowercase().replace(Regex("""[^\p{L}\p{N}]+"""), "").trim()

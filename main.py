@@ -680,6 +680,7 @@ class JarvisLive:
         # conversation that never ends never produces a summary, and the
         # "yesterday we talked about…" line silently disappears.
         self._resume_handle: str | None = None
+        self._recovery_context_pending = False  # inject local transcript if a server resumption handle expires
         self._turn_done_event: asyncio.Event | None = None
         self._dashboard     = None
         self._briefing_sent    = False          # morning briefing fires once per process
@@ -1136,6 +1137,17 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        # A Live resumption handle can expire at the provider's hard session
+        # rollover. Keep continuity by carrying our already-captured transcript
+        # into the replacement session as context instead of pretending the
+        # conversation vanished. This is only used after an actual rejected
+        # resumption handle; normal fresh launches remain fresh.
+        if self._recovery_context_pending and self._session_log:
+            recent = "\n".join(self._session_log[-24:])
+            parts.append(
+                "SESSION ROLLOVER CONTEXT (continue this same conversation; do not announce or summarize this block):\n"
+                + recent
+            )
         parts.append(sys_prompt)
 
         cfg = dict(
@@ -2061,6 +2073,9 @@ class JarvisLive:
                     self._interrupted          = False
 
                     print("[JARVIS] Connected.")
+                    if self._recovery_context_pending:
+                        self.ui.write_log("SYS: Reconnected — conversation context recovered locally.")
+                        self._recovery_context_pending = False
                     if _resumed_with:
                         # Say it plainly: the difference between "it reconnected"
                         # and "it reconnected and still knows what we were doing"
@@ -2136,7 +2151,8 @@ class JarvisLive:
                     or "NOT_FOUND" in str(e)
                 ):
                     print("[JARVIS] 🔗 Resumption handle rejected — starting a fresh session")
-                    self.ui.write_log("SYS: Could not restore the conversation — starting fresh.")
+                    self.ui.write_log("SYS: Session handle expired — recovering conversation context locally.")
+                    self._recovery_context_pending = bool(self._session_log)
                     self._resume_handle = None
                     self._conn_backoff = 0
                     continue
@@ -2225,9 +2241,9 @@ class JarvisLive:
                     self._conn_backoff = 3
             finally:
                 self.session = None
-                # Only save if there was a real conversation (≥3 turns)
-                if len(self._session_log) >= 3:
-                    asyncio.create_task(self._save_session_summary())
+                # A transport/session rollover is not the end of the user's
+                # conversation. Keep the transcript in RAM so an expired provider
+                # resumption handle can be recovered locally on the next connect.
 
             self.set_speaking(False)
             self.ui.set_state("SLEEPING")
