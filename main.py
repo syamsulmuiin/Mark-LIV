@@ -907,6 +907,21 @@ class JarvisLive:
         elif not self.ui.muted:
             self.ui.set_state("LISTENING")
 
+        # Companion audio is half-duplex.  The server UI is headless, so changing
+        # only the local interface state leaves the companion microphone paused
+        # forever after the first audio frame.  Mirror the live speaking state to
+        # authenticated companions so only the active client pauses while JARVIS
+        # speaks and resumes immediately when the turn has drained.
+        if self._dashboard:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._dashboard.broadcast({
+                    "type": "status",
+                    "state": "speaking" if value else "listening",
+                }))
+            except RuntimeError:
+                pass
+
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
         from core.hotkey import PushToTalk
