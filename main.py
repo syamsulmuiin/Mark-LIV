@@ -67,12 +67,12 @@ from memory.memory_manager import (
 from actions.screen_processor  import _capture_camera, _capture_screen
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
+from actions.scheduled_workflow import due_workflows
 from actions.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
-from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
-    get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
+    get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
@@ -323,6 +323,15 @@ def _clean_transcript(text: str) -> str:
     return text.strip()
 
 TOOL_DECLARATIONS = [
+    {
+        "name": "current_datetime",
+        "description": (
+            "Read the server's current local date and time on demand. Call this only when the user asks "
+            "for the current time/date or when an operation such as resolving a relative reminder time requires it. "
+            "Do not call it proactively."
+        ),
+        "parameters": {"type": "OBJECT", "properties": {}}
+    },
     {
         "name": "list_paired_devices",
         "description": "List trusted paired devices, their online state and permitted capabilities. Use this when you need to choose a phone or other paired target.",
@@ -683,7 +692,6 @@ class JarvisLive:
         self._recovery_context_pending = False  # inject local transcript if a server resumption handle expires
         self._turn_done_event: asyncio.Event | None = None
         self._dashboard     = None
-        self._briefing_sent    = False          # morning briefing fires once per process
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
@@ -1073,14 +1081,6 @@ class JarvisLive:
         mem_str    = format_memory_for_prompt(memory)
         sys_prompt = _load_system_prompt()
 
-        now      = datetime.now()
-        time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
-        time_ctx = (
-            f"[CURRENT DATE & TIME]\n"
-            f"Right now it is: {time_str}\n"
-            f"Use this to calculate exact times for reminders.\n\n"
-        )
-
         # Identity injection — overrides any hardcoded name in prompt.txt
         # Address form is a property of the language being spoken, so it is
         # stated as a principle rather than a two-language lookup — the model
@@ -1134,7 +1134,7 @@ class JarvisLive:
             ),
         })
 
-        parts = [time_ctx, identity_ctx]
+        parts = [identity_ctx]
         if mem_str:
             parts.append(mem_str)
         # A Live resumption handle can expire at the provider's hard session
@@ -1269,7 +1269,17 @@ class JarvisLive:
         result = "Done."
 
         try:
-            if name == "recall_memory":
+            if name == "current_datetime":
+                now = datetime.now().astimezone()
+                result = json.dumps({
+                    "local_datetime": now.isoformat(timespec="seconds"),
+                    "date": now.strftime("%Y-%m-%d"),
+                    "time": now.strftime("%H:%M:%S"),
+                    "weekday": now.strftime("%A"),
+                    "timezone": now.tzname() or "local",
+                }, ensure_ascii=False)
+
+            elif name == "recall_memory":
                 # Local file search: no network, no second model. Kept out of
                 # the executor deliberately — it is a dictionary scan over a few
                 # hundred short strings, and a thread hop would cost more than
@@ -1681,142 +1691,6 @@ class JarvisLive:
                 except Exception as exc:
                     print(f"[SERVER] companion audio relay error: {exc}")
 
-    # ── Morning briefing ────────────────────────────────────────────────────────
-
-    async def _send_startup_briefing(self) -> None:
-        """
-        Two-phase briefing optimized for speed:
-          Phase 1 — instant greeting (no tools) → speech starts in <1s
-          Phase 2 — news pre-fetched in a background thread while Phase 1 plays,
-                    delivered as ready text (no Gemini tool-call round-trip) and
-                    shown on the UI content panel. Waits for turn_complete event
-                    instead of a fixed sleep so there is no unnecessary gap.
-        """
-        memory   = load_memory()
-        identity = memory.get("identity", {})
-
-        def _val(k: str) -> str:
-            e = identity.get(k, {})
-            return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
-
-        lang = _val("language")
-        name = _val("name")
-        time_str = datetime.now().strftime("%H:%M")
-
-        # Start fetching news immediately — runs in parallel while phase 1 plays
-        loop = asyncio.get_event_loop()
-        news_future = loop.run_in_executor(None, _fetch_news_sync, "top world news today")
-
-        await asyncio.sleep(0.3)
-        if not self.session:
-            return
-
-        # ── Phase 1: instant greeting ─────────────────────────────────────────
-        # The briefing fires before the user has said anything, so the
-        # remembered language is the only signal there is. It is a starting
-        # point, not a setting: the moment they reply, their language wins.
-        lang_clause = (f" Speak this greeting in {lang}, then follow the "
-                       f"user's own language from their first reply onward."
-                       if lang else "")
-        name_clause = f" Address the user as {name}." if name else ""
-
-        # Inject last session context if available — pop removes it so it's never repeated
-        last = await asyncio.to_thread(pop_last_session)
-        session_clause = ""
-        if last:
-            try:
-                _delta = (datetime.now() - datetime.strptime(last["date"], "%Y-%m-%d")).days
-                _when  = "earlier today" if _delta == 0 else ("yesterday" if _delta == 1 else f"{_delta} days ago")
-            except Exception:
-                _when = "last time"
-            session_clause = (
-                f" Also briefly and naturally mention that {_when}: {last['summary']}"
-            )
-
-        p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
-            f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
-        )
-
-        # Clear the turn-done event so we can wait for Phase 1 to finish
-        if self._turn_done_event:
-            self._turn_done_event.clear()
-
-        await self.session.send_client_content(
-            turns={"role": "user", "parts": [{"text": p1}]},
-            turn_complete=True,
-        )
-        print("[JARVIS] Briefing phase 1 (greeting) sent.")
-
-        # ── Phase 2: fire as soon as Phase 1 audio is done ───────────────────
-        async def _deliver_news():
-            try:
-                lang_str = (f" Speak in {lang} unless the user has since "
-                            f"spoken another language, in which case use theirs."
-                            if lang else "")
-
-                # Wait for news fetch (already running) and Phase 1 turn-complete
-                # in parallel — whichever takes longer determines the wait time
-                news_done   = asyncio.wrap_future(news_future)
-                turn_waited = False
-                if self._turn_done_event:
-                    try:
-                        await asyncio.wait_for(self._turn_done_event.wait(), timeout=6.0)
-                        turn_waited = True
-                    except asyncio.TimeoutError:
-                        pass
-
-                # Extra buffer: turn_complete fires when Gemini finishes *generating*
-                # Phase 1, but audio may still be playing.  Waiting a beat here
-                # prevents Phase 2 audio from arriving while Phase 1 is mid-sentence
-                # (which sounds like a "repeated first response" to the user).
-                if turn_waited:
-                    await asyncio.sleep(0.8)
-                else:
-                    await asyncio.sleep(1.0)
-
-                try:
-                    news_text = await asyncio.wait_for(news_done, timeout=8.0)
-                except Exception as e:
-                    self.ui.write_log(f"SYS: News fetch timed out/failed: {e!r}")
-                    news_text = ""
-
-                if not self.session:
-                    return
-
-                failed = (not news_text) or news_text.startswith(
-                    ("No news found", "Search failed", "Please provide")
-                )
-                if not failed:
-                    # Show on UI content panel immediately
-                    self.ui.show_content("NEWS — top world news today", news_text)
-
-                    p2 = (
-                        f"[BRIEFING] Here are today's top news headlines:\n{news_text}\n\n"
-                        "Pick ONE headline, summarise it in one sentence, then say the full list "
-                        f"is displayed on screen. Do not call any tools.{lang_str}"
-                    )
-                else:
-                    self.ui.write_log(
-                        f"SYS: News unavailable — backend returned: {news_text[:120]!r}"
-                    )
-                    p2 = (
-                        "News headlines could not be fetched right now. "
-                        f"Let the user know briefly.{lang_str}"
-                    )
-
-                await self.session.send_client_content(
-                    turns={"role": "user", "parts": [{"text": p2}]},
-                    turn_complete=True,
-                )
-                print("[JARVIS] Briefing phase 2 (news) sent.")
-            except Exception as e:
-                print(f"[Briefing] Phase 2 error: {e}")
-                print(f"[JARVIS] Briefing phase 2 failed: {e}")
-                self.ui.write_log("SYS: Could not fetch the news for the briefing.")
-
-        asyncio.create_task(_deliver_news())
-
     # ── Session memory ──────────────────────────────────────────────────────────
 
     async def _save_session_summary(self) -> None:
@@ -1968,6 +1842,43 @@ class JarvisLive:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
         self.ui.notify_phone_connected()
 
+    async def _run_scheduled_workflows(self) -> None:
+        """Execute only schedules explicitly created by the user.
+
+        The persisted last_run_date is claimed before execution, so Live-session
+        reconnects cannot fire the same daily workflow twice.
+        """
+        while True:
+            try:
+                for job in due_workflows():
+                    if not self.session:
+                        continue
+                    device_id = job.get("device_id")
+                    if device_id and self._dashboard:
+                        # Route generated speech back to the companion on which
+                        # this schedule was created, if that companion is online.
+                        if device_id in self._dashboard._device_sockets:
+                            self._dashboard._active_voice_device = device_id
+                    instruction = (
+                        "[SCHEDULED USER WORKFLOW] Execute this user-created recurring "
+                        "instruction now. Use your normal tools as needed and obtain "
+                        "time-sensitive information now, not from when it was scheduled. "
+                        "Speak the result naturally to the user. Instruction: "
+                        + str(job.get("command", ""))
+                    )
+                    await self.session.send_client_content(
+                        turns={"role": "user", "parts": [{"text": instruction}]},
+                        turn_complete=True,
+                    )
+                    self.ui.write_log(
+                        f"[Schedule] Ran {job.get('id')} — {job.get('command', '')[:80]}"
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"[Schedule] {e}")
+            await asyncio.sleep(20)
+
     # ── dashboard command relay ─────────────────────────────────────────────
 
     async def _process_dashboard_commands(self) -> None:
@@ -2111,16 +2022,11 @@ class JarvisLive:
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
+                    tg.create_task(self._run_scheduled_workflows())
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())
 
-                    # Morning briefing — fires once per process launch (if enabled).
-                    # Skipped in wake-word mode: it comes up asleep, and a briefing
-                    # would mean talking while "asleep".
-                    if not self._briefing_sent and get_brief_enabled() and self._awake:
-                        self._briefing_sent = True
-                        tg.create_task(self._send_startup_briefing())
 
             except KeyboardInterrupt:
                 raise
@@ -2302,30 +2208,51 @@ def _is_markliv_worker(pid):
     except Exception:
         return False
 
-def _server_pid():
+def _read_pidfile():
     pidfile, _ = _runtime_paths()
     try:
-        pid = int(pidfile.read_text(encoding="utf-8").strip())
-        if _pid_alive(pid) and _is_markliv_worker(pid):
-            return pid
-        pidfile.unlink(missing_ok=True)
+        return int(pidfile.read_text(encoding="utf-8").strip())
     except Exception:
-        pass
+        return None
+
+def _local_server_identity(timeout=1.0):
+    """Return the PID reported by MARK-LIV itself, or None.
+
+    Process command-line inspection on Windows proved intermittent.  The local
+    health endpoint is a stronger identity check because only this server exposes
+    the endpoint and it reports its own OS PID.
+    """
+    try:
+        import urllib.request as _ur, json as _json
+        req = _ur.Request("http://127.0.0.1:8000/api/local/health", headers={"X-Jarvis-Local": "1"})
+        with _ur.urlopen(req, timeout=timeout) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+        if data.get("service") == "MARK-LIV" and data.get("status") == "ready":
+            return int(data.get("pid"))
+    except Exception:
+        return None
+    return None
+
+def _server_pid():
+    pidfile, _ = _runtime_paths()
+    file_pid = _read_pidfile()
+    service_pid = _local_server_identity()
+    if service_pid and _pid_alive(service_pid):
+        # Self-heal a missing/stale PID file from the running MARK-LIV server.
+        if file_pid != service_pid:
+            try: pidfile.write_text(str(service_pid), encoding="utf-8")
+            except Exception: pass
+        return service_pid
+    # During early startup the HTTP endpoint may not exist yet.  Accept the PID
+    # file only when the worker command line can positively identify it.
+    if file_pid and _pid_alive(file_pid) and _is_markliv_worker(file_pid):
+        return file_pid
+    if file_pid and not _pid_alive(file_pid):
+        pidfile.unlink(missing_ok=True)
     return None
 
 def _local_server_ready(timeout=0.8):
-    """Return True as soon as the local MARK-LIV HTTP listener accepts TCP.
-
-    Readiness must not depend on a particular HTTP route: the headless server
-    intentionally rejects browser/control routes, and that policy can change
-    independently of process lifecycle.
-    """
-    import socket as _socket
-    try:
-        with _socket.create_connection(("127.0.0.1", 8000), timeout=timeout):
-            return True
-    except OSError:
-        return False
+    return _local_server_identity(timeout=timeout) is not None
 
 def _spawn_server():
     import time as _time
@@ -2383,8 +2310,9 @@ def _stop_server():
         pidfile.unlink(missing_ok=True)
         print("MARK LIV server is not running.")
         return
-    if not _is_markliv_worker(pid):
-        print(f"Refusing to stop PID {pid}: it is not a MARK LIV server worker.")
+    service_pid = _local_server_identity()
+    if service_pid != pid:
+        print(f"Refusing to stop PID {pid}: MARK LIV service identity could not be verified.")
         return
     if sys.platform == "win32":
         r = _subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, timeout=10)

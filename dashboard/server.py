@@ -636,7 +636,7 @@ class DashboardServer:
         @app.middleware("http")
         async def native_companions_only(req: Request, call_next):
             path = req.url.path
-            allowed = (path.startswith("/api/pairing/offer/") or path == "/api/pairing/accept" or path == "/api/local/pairing/new")
+            allowed = (path.startswith("/api/pairing/offer/") or path == "/api/pairing/accept" or path in ("/api/local/pairing/new", "/api/local/health"))
             if not allowed:
                 return JSONResponse({"error": "Install a MARK LIV companion client to access this server."}, status_code=404)
             return await call_next(req)
@@ -673,6 +673,13 @@ class DashboardServer:
             if not offer:
                 return JSONResponse({"error": "Pairing code invalid or expired"}, status_code=404)
             return JSONResponse(offer)
+
+        @app.get("/api/local/health")
+        async def local_health(req: Request):
+            host = req.client.host if req.client else ""
+            if host not in ("127.0.0.1", "::1") or req.headers.get("x-jarvis-local") != "1":
+                return JSONResponse({"error": "local access only"}, status_code=403)
+            return JSONResponse({"service": "MARK-LIV", "status": "ready", "pid": os.getpid()})
 
         @app.post("/api/local/pairing/new")
         async def local_pairing_new(req: Request):
