@@ -2,7 +2,7 @@
 The server remains headless; text, microphone and speaker live on this client.
 """
 from __future__ import annotations
-import base64, json, os, queue, socket, threading, uuid, subprocess, sys, shutil, signal
+import base64, json, os, queue, socket, threading, uuid, subprocess, sys, shutil, signal, time
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -32,8 +32,7 @@ class App:
         self.st=identity(load()); self.ws=None; self.mic=None; self.out=None; self.running=False
         self.root=tk.Tk(); self.root.title('MARK LIV Companion'); self.root.geometry('620x520')
         f=ttk.Frame(self.root,padding=14); f.pack(fill='both',expand=True)
-        ttk.Label(f,text='Server URL').grid(row=0,column=0,sticky='w'); self.url=tk.StringVar(value=self.st.get('server','http://127.0.0.1:8000')); ttk.Entry(f,textvariable=self.url,width=48).grid(row=0,column=1,sticky='ew')
-        ttk.Label(f,text='Pair Code').grid(row=1,column=0,sticky='w'); self.code=tk.StringVar(); ttk.Entry(f,textvariable=self.code,width=16).grid(row=1,column=1,sticky='w'); ttk.Button(f,text='Pair',command=self.pair).grid(row=1,column=2)
+        ttk.Label(f,text='Pair Code').grid(row=0,column=0,sticky='w'); self.code=tk.StringVar(); ttk.Entry(f,textvariable=self.code,width=16).grid(row=0,column=1,sticky='w'); ttk.Button(f,text='Pair',command=self.pair).grid(row=0,column=2)
         self.status=tk.StringVar(value='Disconnected'); ttk.Label(f,textvariable=self.status).grid(row=2,column=0,columnspan=3,sticky='w',pady=8)
         self.log=tk.Text(f,height=18,state='disabled'); self.log.grid(row=3,column=0,columnspan=3,sticky='nsew')
         self.cmd=tk.StringVar(); e=ttk.Entry(f,textvariable=self.cmd); e.grid(row=4,column=0,columnspan=2,sticky='ew',pady=8); e.bind('<Return>',lambda _e:self.send()); ttk.Button(f,text='Send',command=self.send).grid(row=4,column=2)
@@ -42,9 +41,22 @@ class App:
         if self.st.get('paired'): self.root.after(300,self.connect)
         self.root.protocol('WM_DELETE_WINDOW',self.close)
     def note(self,s): self.root.after(0,lambda:(self.log.configure(state='normal'),self.log.insert('end',s+'\n'),self.log.see('end'),self.log.configure(state='disabled')))
+    def discover(self, code, timeout=4.0):
+        msg=json.dumps({'magic':'MARKLIV_DISCOVER_V1','code':code}).encode()
+        sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); sock.setsockopt(socket.SOL_SOCKET,socket.SO_BROADCAST,1); sock.settimeout(0.5)
+        try:
+            deadline=time.time()+timeout
+            while time.time()<deadline:
+                sock.sendto(msg,('255.255.255.255',37991))
+                try:
+                    data,_=sock.recvfrom(4096); r=json.loads(data.decode())
+                    if r.get('magic')=='MARKLIV_DISCOVER_V1' and r.get('code')==code:return r['server'].rstrip('/')
+                except socket.timeout: pass
+            raise RuntimeError('Server with this Pair Code was not found on the local network')
+        finally:sock.close()
     def pair(self):
         try:
-            base=self.url.get().rstrip('/'); code=self.code.get().strip().upper(); o=requests.get(f'{base}/api/pairing/offer/{code}',timeout=8,verify=False).json(); nonce=o['nonce']
+            code=self.code.get().strip().upper(); base=self.discover(code); o=requests.get(f'{base}/api/pairing/offer/{code}',timeout=8,verify=False).json(); nonce=o['nonce']
             peer={'device_id':self.st['device_id'],'name':self.st['name'],'public_key':self.st['public_key']}; sig=b64(priv(self.st).sign(f'{nonce}:{code}'.encode()))
             caps=['jarvis.command','notifications.receive','open_url','app.launch','app.close','desktop.command','legacy.action']
             r=requests.post(f'{base}/api/pairing/accept',json={'code':code,'peer':peer,'signature':sig,'capabilities':caps},timeout=8,verify=False); r.raise_for_status()
@@ -52,7 +64,9 @@ class App:
         except Exception as e: messagebox.showerror('Pair failed',str(e))
     def connect(self):
         if self.ws:return
-        base=self.st.get('server') or self.url.get().rstrip('/'); wsbase=base.replace('https://','wss://').replace('http://','ws://'); url=f"{wsbase}/ws/device?device_id={self.st['device_id']}"
+        base=self.st.get('server');
+        if not base: self.note('Not paired'); return
+        wsbase=base.replace('https://','wss://').replace('http://','ws://'); url=f"{wsbase}/ws/device?device_id={self.st['device_id']}"
         self.ws=websocket.WebSocketApp(url,on_message=self.on_message,on_data=self.on_data,on_close=lambda *_:self.root.after(0,lambda:self.status.set('Disconnected')),on_error=lambda _w,e:self.note(f'Connection error: {e}'))
         threading.Thread(target=lambda:self.ws.run_forever(sslopt={'cert_reqs':0}),daemon=True).start()
     def on_message(self,_w,text):
@@ -62,10 +76,15 @@ class App:
             if not verify(expected,f"{self.st['device_id']}:{ch}".encode(),m.get('server_signature','')): self.note('Server identity verification failed'); self.disconnect(); return
             self.ws.send(json.dumps({'type':'proof','signature':b64(priv(self.st).sign(ch.encode()))}))
         elif typ=='ready': self.root.after(0,lambda:self.status.set('Connected · voice on client')); self.start_audio()
+        elif typ=='status':
+            state=str(m.get('state','')).upper()
+            if state=='SPEAKING': self.pause_mic()
+            elif state in ('LISTENING','ACTIVE'): self.resume_mic()
         elif typ=='log': self.note(f"{m.get('speaker','JARVIS')}: {m.get('text','')}")
         elif typ=='capability.call': self.capability(m)
     def on_data(self,_w,data,opcode,_fin):
         if opcode==websocket.ABNF.OPCODE_BINARY and self.out:
+            self.pause_mic()
             try:self.out.write(data)
             except Exception as e:self.note(f'Audio output error: {e}')
     def start_audio(self):
@@ -79,6 +98,14 @@ class App:
                     except Exception:pass
             self.mic=sd.RawInputStream(samplerate=16000,channels=1,dtype='int16',blocksize=1024,callback=cb); self.mic.start()
         except Exception as e:self.note(f'Audio device error: {e}')
+    def pause_mic(self):
+        try:
+            if self.mic and self.mic.active:self.mic.stop()
+        except Exception:pass
+    def resume_mic(self):
+        try:
+            if self.running and self.mic and not self.mic.active:self.mic.start()
+        except Exception:pass
     def send(self):
         text=self.cmd.get().strip()
         if text and self.ws: self.ws.send(json.dumps({'type':'jarvis.command','text':text})); self.note('YOU: '+text); self.cmd.set('')

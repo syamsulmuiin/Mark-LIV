@@ -24,6 +24,10 @@ import org.json.JSONObject
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.*
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.SocketTimeoutException
 import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
 import javax.net.ssl.*
@@ -32,7 +36,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var pairStatus: TextView
     private lateinit var pairCode: EditText
-    private lateinit var serverUrl: EditText
     private lateinit var pairPanel: View
     private lateinit var voicePanel: View
     private lateinit var orb: JarvisOrbView
@@ -47,12 +50,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var micRunning = false
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
-    private val serverBase: String get() = serverUrl.text.toString().trim().trimEnd('/').ifBlank { prefs.getString("server", "") ?: "" }
+    private val serverBase: String get() = prefs.getString("server", "") ?: ""
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         setContentView(R.layout.activity_main)
-        status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode); serverUrl=findViewById(R.id.serverUrl)
+        status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode)
         pairPanel=findViewById(R.id.pairPanel); voicePanel=findViewById(R.id.voicePanel)
         orb=findViewById(R.id.orb); transcript=findViewById(R.id.transcript); transcriptScroll=findViewById(R.id.transcriptScroll); endConversation=findViewById(R.id.endConversation)
         startConversation=findViewById(R.id.startConversation); phoneControl=findViewById(R.id.phoneControl)
@@ -60,7 +63,6 @@ class MainActivity : AppCompatActivity() {
         endConversation.setOnClickListener { endVoice() }
         startConversation.setOnClickListener { connect() }
         phoneControl.setOnClickListener { showPhoneControlMenu(it) }
-        serverUrl.setText(prefs.getString("server", ""))
         if (Build.VERSION.SDK_INT>=33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
         intent?.data?.getQueryParameter("code")?.let { pairCode.setText(it.uppercase()); pairWithCode(it) }
         if (intent?.data==null && prefs.getBoolean("paired", false)) { showVoice(); connect() }
@@ -95,9 +97,33 @@ class MainActivity : AppCompatActivity() {
         val code=rawCode.trim().uppercase()
         if(code.length != 6){ pairStatus.text=getString(R.string.pair_code_help); return }
         pairStatus.text=getString(R.string.pairing)
+        Thread {
+            val discovered = try { discoverServer(code) } catch(e:Exception) { pairUi("Pairing failed: ${e.message}"); return@Thread }
+            pairAgainstServer(code, discovered)
+        }.start()
+    }
+
+    private fun discoverServer(code:String):String {
+        val payload=JSONObject().put("magic","MARKLIV_DISCOVER_V1").put("code",code).toString().toByteArray()
+        DatagramSocket().use { sock ->
+            sock.broadcast=true; sock.soTimeout=700
+            val deadline=System.currentTimeMillis()+5000
+            while(System.currentTimeMillis()<deadline){
+                sock.send(DatagramPacket(payload,payload.size,InetAddress.getByName("255.255.255.255"),37991))
+                try {
+                    val buf=ByteArray(4096); val packet=DatagramPacket(buf,buf.size); sock.receive(packet)
+                    val r=JSONObject(String(packet.data,0,packet.length))
+                    if(r.optString("magic")=="MARKLIV_DISCOVER_V1" && r.optString("code")==code) return r.getString("server").trimEnd('/')
+                } catch(_:SocketTimeoutException) {}
+            }
+        }
+        throw java.io.IOException("Server with this Pair Code was not found on the local network")
+    }
+
+    private fun pairAgainstServer(code:String, base:String) {
         val ident=identity()
         val peer=JSONObject().put("device_id",ident.first).put("name",Build.MODEL).put("public_key",b64(ident.third))
-        client.newCall(Request.Builder().url("$serverBase/api/pairing/offer/$code").build()).enqueue(object:Callback{
+        client.newCall(Request.Builder().url("$base/api/pairing/offer/$code").build()).enqueue(object:Callback{
             override fun onFailure(c:Call,e:java.io.IOException)=pairUi("Pairing failed: ${e.message}")
             override fun onResponse(c:Call,r:Response){ r.use { response ->
                 if(!response.isSuccessful){ pairUi(if(response.code==502) "JARVIS tunnel is offline (502)" else "Pairing server error: ${response.code}"); return }
@@ -106,12 +132,12 @@ class MainActivity : AppCompatActivity() {
                 if(nonce.isBlank()||serverKey.isBlank()||serverId.isBlank()){pairUi("Pairing code invalid or expired");return}
                 val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","app.close","android.settings.open","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global","android.screen.lock","android.screen.wake"))
                 val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
-                val req=Request.Builder().url("$serverBase/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
+                val req=Request.Builder().url("$base/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
                 client.newCall(req).enqueue(object:Callback{
                     override fun onFailure(c:Call,e:java.io.IOException)=pairUi("Pair failed: ${e.message}")
                     override fun onResponse(c:Call,r:Response){ r.use {
                         if(!it.isSuccessful){pairUi("Pair rejected: ${it.code}");return}
-                        prefs.edit().putString("server",serverBase).putString("server_key",serverKey).putString("server_id",serverId).putBoolean("paired",true).apply()
+                        prefs.edit().putString("server",base).putString("server_key",serverKey).putString("server_id",serverId).putBoolean("paired",true).apply()
                         showVoice(); connect()
                     }}
                 })
@@ -127,12 +153,12 @@ class MainActivity : AppCompatActivity() {
                 val m=JSONObject(text); when(m.optString("type")){
                     "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
                     "ready"->{ runOnUiThread { endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE }; setVoiceState("LISTENING"); startMic() }
-                    "status"->{ val st=m.optString("state").uppercase(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
+                    "status"->{ val st=m.optString("state").uppercase(); if(st=="SPEAKING") stopMic() else if(st=="LISTENING"||st=="ACTIVE") startMic(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
                     "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")); if(m.optString("speaker")=="jarvis") setVoiceState("LISTENING") }
                     "capability.call"->executeCapability(w,m)
                 }
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
-            override fun onMessage(w:WebSocket,bytes:ByteString){ setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
+            override fun onMessage(w:WebSocket,bytes:ByteString){ stopMic(); setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
             override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else setEnded() }
             override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE } }
         })

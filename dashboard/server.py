@@ -41,6 +41,8 @@ from core.device_mesh import DeviceMesh
 from core.cloudflare_tunnel import NamedTunnel, enabled as cloudflare_enabled, public_url as cloudflare_public_url
 STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000
+DISCOVERY_PORT = 37991
+DISCOVERY_MAGIC = "MARKLIV_DISCOVER_V1"
 MAX_UPLOAD_MB = 500
 
 
@@ -1067,11 +1069,38 @@ class DashboardServer:
         print(f"[Dashboard] Manual entry:  {self._ip}:{PORT + 1}  (type in browser, accept cert once)")
         await uvicorn.Server(cfg).serve()
 
+    def _serve_pairing_discovery(self) -> None:
+        """LAN discovery for native companions. A valid Pair Code is the lookup key."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", DISCOVERY_PORT))
+            while True:
+                data, addr = sock.recvfrom(2048)
+                try:
+                    req = json.loads(data.decode("utf-8"))
+                    if req.get("magic") != DISCOVERY_MAGIC:
+                        continue
+                    code = str(req.get("code") or "").upper()
+                    offer = self._mesh.pending_offer(code)
+                    if not offer:
+                        continue
+                    reply = {"magic": DISCOVERY_MAGIC, "code": code, "server": self.get_remote_url(),
+                             "device_id": self._mesh.device_id, "public_key": self._mesh.public_key}
+                    sock.sendto(json.dumps(reply).encode("utf-8"), addr)
+                except Exception:
+                    continue
+        finally:
+            sock.close()
+
     async def serve(self) -> None:
         if not _DEPS_OK:
             print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
             print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
             return
+
+        # Pair-code LAN discovery is headless and exposes no interactive server UI.
+        asyncio.get_event_loop().run_in_executor(None, self._serve_pairing_discovery)
 
         # Start the optional outbound-only Cloudflare tunnel. It exposes the same
         # dashboard/device WebSocket; JARVIS pairing still authenticates devices.

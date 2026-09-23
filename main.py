@@ -2167,12 +2167,6 @@ def _spawn_server():
     pidfile, logfile = _runtime_paths()
     if (pid := _server_pid()):
         print(f"MARK LIV server already running (PID {pid}).")
-        try:
-            import urllib.request as _ur, json as _json
-            req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
-            with _ur.urlopen(req,timeout=2) as r: data=_json.loads(r.read().decode("utf-8"))
-            print(f"Native companion Pair Code: {data['code']} (valid 10 minutes)")
-        except Exception: pass
         return pid
     log=open(logfile, "ab", buffering=0)
     kwargs=dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
@@ -2182,19 +2176,22 @@ def _spawn_server():
     p=_subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--server-worker"], **kwargs)
     pidfile.write_text(str(p.pid), encoding="utf-8")
     print(f"MARK LIV server started (PID {p.pid}).")
-    # A start command is also the only server-side pairing surface: no dashboard/CLI.
-    # Ask the worker for a short-lived native-companion code and print it once.
+    return p.pid
+
+
+def _pair_device():
+    """Create a short-lived pairing code on an already running headless server."""
+    if not _server_pid():
+        print("MARK LIV server is not running. Start it first with --start.")
+        return
     try:
         import urllib.request as _ur, json as _json
-        for _ in range(30):
-            try:
-                req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
-                with _ur.urlopen(req,timeout=1) as r: data=_json.loads(r.read().decode("utf-8"))
-                print(f"Native companion Pair Code: {data['code']} (valid 10 minutes)")
-                break
-            except Exception: time.sleep(0.2)
-    except Exception: pass
-    return p.pid
+        req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
+        with _ur.urlopen(req,timeout=3) as r: data=_json.loads(r.read().decode("utf-8"))
+        print(f"MARK LIV Pair Code: {data['code']}")
+        print("Expires in: 10 minutes")
+    except Exception as exc:
+        print(f"Could not create Pair Code: {exc}")
 
 def _stop_server():
     import signal
@@ -2247,12 +2244,14 @@ def _runtime_mode(argv=None):
     g.add_argument("--enable",action="store_true",help="enable autostart and start server")
     g.add_argument("--stop",action="store_true",help="stop server")
     g.add_argument("--disable",action="store_true",help="disable autostart")
+    g.add_argument("--pair",action="store_true",help="create a Pair Code for a new companion")
     g.add_argument("--server-worker",action="store_true",help=argparse.SUPPRESS)
     a=parser.parse_args(argv)
     if a.start:return "start"
     if a.enable:return "enable"
     if a.stop:return "stop"
     if a.disable:return "disable"
+    if a.pair:return "pair"
     return "worker"
 
 def main(argv=None):
@@ -2261,6 +2260,7 @@ def main(argv=None):
     if mode=="stop": _stop_server(); return
     if mode=="enable": _autostart_enable(); return
     if mode=="disable": _autostart_disable(); return
+    if mode=="pair": _pair_device(); return
     from core.interfaces import ServerInterface
     interface=ServerInterface(); interface.wait_for_api_key(); jarvis=JarvisLive(interface)
     # Wake-word capture is a client concern in server-only mode; never open a server microphone.
