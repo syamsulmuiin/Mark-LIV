@@ -405,3 +405,8 @@ Engineered by a developer building a real-world JARVIS-style assistant.
 | --- | --- |
 | YouTube | [@FatihMakes](https://www.youtube.com/@FatihMakes) |
 | Instagram | [@fatihmakes](https://www.instagram.com/fatihmakes) |
+
+---
+
+## Server-only runtime (current)
+MARK LIV no longer exposes desktop GUI, interactive CLI, or browser dashboard control on the server. Use an installed Android or Windows/Linux/macOS companion. Server commands: `python main.py --start`, `--enable`, `--stop`, `--disable`. See `SERVER_CLIENT_ARCHITECTURE.md`.

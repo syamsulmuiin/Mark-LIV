@@ -323,7 +323,7 @@ def _ensure_crypto_js() -> None:
         print(f"[Dashboard] Encryption will fall back to CDN load on client.")
 
 
-_ensure_crypto_js()
+# Native-companion-only server: no browser dashboard assets are downloaded.
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -476,11 +476,9 @@ class DashboardServer:
         self._public_url                   = ""
         self._device_sockets: dict[str, WebSocket] = {}
         self._device_pending_calls: dict[str, asyncio.Future] = {}
+        self._active_voice_device: str | None = None
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
-        self._login_html                  = _read("login.html")
-        self._app_html                    = _read("app.html")
-        self._pair_html                   = _read("pair.html")
         self.app                          = self._build_app()
 
     # ── one-time key management ───────────────────────────────────────────
@@ -590,15 +588,20 @@ class DashboardServer:
             self._device_sockets.pop(device_id, None)
 
     async def send_device_audio(self, pcm: bytes) -> None:
-        """Mirror JARVIS 24 kHz mono PCM output to connected trusted devices."""
-        dead = []
-        for device_id, ws in list(self._device_sockets.items()):
-            try:
-                await ws.send_bytes(pcm)
-            except Exception:
-                dead.append(device_id)
-        for device_id in dead:
+        """Send voice only to the companion that owns the current interaction."""
+        device_id = self._active_voice_device
+        if not device_id:
+            return
+        ws = self._device_sockets.get(device_id)
+        if ws is None:
+            self._active_voice_device = None
+            return
+        try:
+            await ws.send_bytes(pcm)
+        except Exception:
             self._device_sockets.pop(device_id, None)
+            if self._active_voice_device == device_id:
+                self._active_voice_device = None
 
     async def call_device(self, device_id: str, capability: str, args: dict | None = None, timeout: float = 30.0):
         """Invoke an explicitly permitted capability on a connected paired node."""
@@ -619,6 +622,17 @@ class DashboardServer:
 
     def _build_app(self) -> "FastAPI":
         app = FastAPI(docs_url=None, redoc_url=None)
+
+        # Server-only architecture: browsers are not a control surface anymore.
+        # Only native-companion pairing endpoints remain exposed over HTTP; the
+        # authenticated device mesh uses /ws/device below.
+        @app.middleware("http")
+        async def native_companions_only(req: Request, call_next):
+            path = req.url.path
+            allowed = (path.startswith("/api/pairing/offer/") or path == "/api/pairing/accept" or path == "/api/local/pairing/new")
+            if not allowed:
+                return JSONResponse({"error": "Install a MARK LIV companion client to access this server."}, status_code=404)
+            return await call_next(req)
 
         def _auth(req: Request) -> bool:
             tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
@@ -826,6 +840,7 @@ class DashboardServer:
                         break
                     audio = packet.get("bytes")
                     if audio is not None:
+                        self._active_voice_device = device_id
                         try:
                             self._phone_audio_queue.put_nowait({"data": audio, "mime_type": "audio/pcm;rate=16000"})
                         except asyncio.QueueFull:
@@ -843,6 +858,7 @@ class DashboardServer:
                             await websocket.send_json({"type":"error","error":"capability denied"}); continue
                         text = str(msg.get("text") or "").strip()
                         if text:
+                            self._active_voice_device = device_id
                             await self._command_queue.put(text)
                             if self._wake_callback: self._wake_callback()
                     elif msg.get("type") == "jarvis.interrupt":
@@ -859,6 +875,8 @@ class DashboardServer:
             finally:
                 if self._device_sockets.get(device_id) is websocket:
                     self._device_sockets.pop(device_id, None)
+                if self._active_voice_device == device_id:
+                    self._active_voice_device = None
 
         @app.post("/api/command")
         async def command(req: Request):

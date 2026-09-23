@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var pairStatus: TextView
     private lateinit var pairCode: EditText
+    private lateinit var serverUrl: EditText
     private lateinit var pairPanel: View
     private lateinit var voicePanel: View
     private lateinit var orb: JarvisOrbView
@@ -46,12 +47,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var micRunning = false
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
-    private val serverBase = "https://auth.kasirdigital.web.id"
+    private val serverBase: String get() = serverUrl.text.toString().trim().trimEnd('/').ifBlank { prefs.getString("server", "") ?: "" }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         setContentView(R.layout.activity_main)
-        status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode)
+        status=findViewById(R.id.status); pairStatus=findViewById(R.id.pairStatus); pairCode=findViewById(R.id.pairCode); serverUrl=findViewById(R.id.serverUrl)
         pairPanel=findViewById(R.id.pairPanel); voicePanel=findViewById(R.id.voicePanel)
         orb=findViewById(R.id.orb); transcript=findViewById(R.id.transcript); transcriptScroll=findViewById(R.id.transcriptScroll); endConversation=findViewById(R.id.endConversation)
         startConversation=findViewById(R.id.startConversation); phoneControl=findViewById(R.id.phoneControl)
@@ -59,6 +60,7 @@ class MainActivity : AppCompatActivity() {
         endConversation.setOnClickListener { endVoice() }
         startConversation.setOnClickListener { connect() }
         phoneControl.setOnClickListener { showPhoneControlMenu(it) }
+        serverUrl.setText(prefs.getString("server", ""))
         if (Build.VERSION.SDK_INT>=33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
         intent?.data?.getQueryParameter("code")?.let { pairCode.setText(it.uppercase()); pairWithCode(it) }
         if (intent?.data==null && prefs.getBoolean("paired", false)) { showVoice(); connect() }
@@ -102,7 +104,7 @@ class MainActivity : AppCompatActivity() {
                 val o=try { JSONObject(response.body?.string().orEmpty()) } catch(_:Exception){ pairUi("Invalid response from JARVIS"); return }
                 val nonce=o.optString("nonce"); val serverKey=o.optString("public_key"); val serverId=o.optString("device_id")
                 if(nonce.isBlank()||serverKey.isBlank()||serverId.isBlank()){pairUi("Pairing code invalid or expired");return}
-                val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","android.settings.open","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global","android.screen.lock","android.screen.wake"))
+                val caps=org.json.JSONArray(listOf("jarvis.command","notification","vibration","clipboard.write","open_url","app.launch","app.close","android.settings.open","android.ui.inspect","android.ui.click","android.ui.text","android.ui.scroll","android.ui.global","android.screen.lock","android.screen.wake"))
                 val body=JSONObject().put("code",code).put("peer",peer).put("signature",sign("$nonce:$code".toByteArray())).put("capabilities",caps)
                 val req=Request.Builder().url("$serverBase/api/pairing/accept").post(body.toString().toRequestBody("application/json".toMediaType())).build()
                 client.newCall(req).enqueue(object:Callback{
@@ -151,9 +153,9 @@ class MainActivity : AppCompatActivity() {
     private fun playAudio(pcm:ByteArray){
         orb.audioLevel(pcmLevel(pcm,pcm.size))
         try {
-            if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack(AudioManager.STREAM_MUSIC,24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2,AudioTrack.MODE_STREAM); player?.play() }
+            if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setBufferSizeInBytes(min*2).setTransferMode(AudioTrack.MODE_STREAM).build(); player?.play() }
             player?.write(pcm,0,pcm.size)
-        } catch(_:Exception){}
+        } catch(e:Exception){ ui("Audio playback error: ${e.message}") }
     }
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){ super.onRequestPermissionsResult(requestCode,permissions,grantResults); if(requestCode==42){ if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) startMic() else ui("Microphone permission is required for Live Voice") } }
 
@@ -176,6 +178,7 @@ class MainActivity : AppCompatActivity() {
         "clipboard.write"->{ (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("JARVIS",a.optString("text"))) }
         "open_url"->{ startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(a.getString("url"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         "app.launch"->{ val query=a.optString("package").ifBlank { a.optString("app") }.ifBlank { a.optString("name") }; val pkg=resolveAppPackage(query)?:error("App not found: $query"); val i=packageManager.getLaunchIntentForPackage(pkg)?:error("App has no launch activity: $pkg"); startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); result="opened $pkg" }
+        "app.close"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.global("home") }
         "android.settings.open"->{ val page=a.optString("page").ifBlank { a.optString("section") }; startActivity(settingsIntent(page)); result=if(page.isBlank()) "opened Android Settings" else "opened Android Settings: $page" }
         "android.ui.inspect"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.inspect(a.optInt("max_nodes",120)).toString() }
         "android.ui.click"->{ val svc=JarvisAccessibilityService.instance?:error("Accessibility control is disabled on the phone"); result=svc.click(a.optString("text"),a.optString("view_id")) }
@@ -194,9 +197,11 @@ class MainActivity : AppCompatActivity() {
         val q=normalizeName(query)
         val aliases=mapOf("whatsapp" to "com.whatsapp", "wa" to "com.whatsapp", "youtube" to "com.google.android.youtube", "chrome" to "com.android.chrome", "gmail" to "com.google.android.gm", "maps" to "com.google.android.apps.maps", "googlemaps" to "com.google.android.apps.maps")
         aliases[q]?.let { if(packageManager.getLaunchIntentForPackage(it)!=null) return it }
-        val apps=if(Build.VERSION.SDK_INT>=33) packageManager.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0)) else @Suppress("DEPRECATION") packageManager.getInstalledApplications(0)
-        return apps.asSequence().map { it to packageManager.getApplicationLabel(it).toString() }.filter { packageManager.getLaunchIntentForPackage(it.first.packageName)!=null }.sortedByDescending { val n=normalizeName(it.second); when { n==q -> 3; n.contains(q)||q.contains(n) -> 2; normalizeName(it.first.packageName).contains(q) -> 1; else -> 0 } }.firstOrNull { val n=normalizeName(it.second); n==q || n.contains(q) || q.contains(n) || normalizeName(it.first.packageName).contains(q) }?.first?.packageName
+        val launcher=Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val acts=if(Build.VERSION.SDK_INT>=33) packageManager.queryIntentActivities(launcher,PackageManager.ResolveInfoFlags.of(0)) else @Suppress("DEPRECATION") packageManager.queryIntentActivities(launcher,0)
+        return acts.asSequence().map { it.activityInfo.packageName to it.loadLabel(packageManager).toString() }.sortedByDescending { val n=normalizeName(it.second); when { n==q -> 3; n.contains(q)||q.contains(n) -> 2; normalizeName(it.first).contains(q) -> 1; else -> 0 } }.firstOrNull { val n=normalizeName(it.second); n==q || n.contains(q) || q.contains(n) || normalizeName(it.first).contains(q) }?.first
     }
+
     private fun settingsIntent(raw:String):Intent {
         val p=normalizeName(raw)
         val action=when {

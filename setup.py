@@ -55,17 +55,6 @@ def _check_python() -> None:
         sys.exit(1)
 
 
-def _check_assets() -> None:
-    """The avatar's face is a shipped file; a truncated clone should say so."""
-    face = HERE / "core" / "face_model.obj"
-    if not face.exists() or face.stat().st_size < 4096:
-        print(
-            "\n⚠️  core/face_model.obj is missing or truncated — the avatar will "
-            "fall back to the plain glowing core.\n"
-            "    Re-clone the repository, or fetch that one file again."
-        )
-
-
 def main() -> None:
     print(f"⚙  MARK LIV setup — detected OS: {OS or 'unknown'}, "
           f"Python {sys.version_info[0]}.{sys.version_info[1]}")
@@ -89,7 +78,6 @@ def main() -> None:
         print("    Everything except browser automation works. Retry later with:")
         print(f'    {sys.executable} -m playwright install chromium firefox')
 
-    _check_assets()
 
     # One setup path for all runtimes. This is the same configuration used by
     # `python main.py --setup`; setup.py only adds dependency installation first.
@@ -130,9 +118,9 @@ def main() -> None:
         )
 
     print("\n✅ Setup complete!")
-    print("   1) Launch it:  python main.py")
-    print("   2) Reconfigure later only if needed: python main.py --setup")
-    print("   3) (Optional) Enable 'Hey Jarvis' from ⚙ → WAKE WORD.")
+    print("   1) Start server:       python main.py --start")
+    print("   2) Enable autostart:   python main.py --enable")
+    print("   3) Install a companion from android-companion/ or desktop-companion/.")
 
 
 if __name__ == "__main__":

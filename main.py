@@ -332,10 +332,10 @@ TOOL_DECLARATIONS = [
         "name": "call_paired_device",
         "description": (
             "Control an online trusted paired device. Use natural app names with app.launch: put the app name "
-            "in args.app (for example WhatsApp); the Android companion resolves the installed package itself. "
+            "in args.app (for example Chrome or WhatsApp). Android resolves the installed package; desktop companions resolve the local application. "
             "For Android Settings use android.settings.open with optional args.page such as bluetooth, wifi, "
             "apps, accessibility, display, sound, location, security, battery, date/time, or keyboard. "
-            "For any installed app, app.launch opens it by natural app name. To reach a main menu, submenu, conversation, "
+            "For any installed app, app.launch opens it by natural app name. On desktop companions app.close closes the named local application; on Android it leaves the current app and returns that device to Home because ordinary Android companions cannot force-stop arbitrary apps. Use desktop.command with args.action=lock to lock a desktop companion. On Windows/Linux/macOS companions, use capability legacy.action to run the established local MARK LIV tools without losing pre-refactor functionality. Pass args.tool as one of open_app, computer_control, computer_settings, desktop_control, file_controller, browser_control, screen_processor, send_message, or system_monitor, and put the original tool arguments in args.parameters. Use this for mouse/keyboard/window/settings/file/browser/screen/message/system operations on the target desktop. To reach a main menu, submenu, conversation, "
             "button, field, or other in-app destination, launch the app then repeatedly use android.ui.inspect and "
             "android.ui.click/android.ui.scroll/android.ui.text step by step until the requested destination is reached. "
             "Use open_url when the user provides a supported deep link/URL shortcut. For Android Settings use "
@@ -1361,124 +1361,15 @@ class JarvisLive:
             )
 
     async def _listen_audio(self):
-        print("[JARVIS] 🎤 Mic started")
-        loop = asyncio.get_event_loop()
+        """Server runtime never opens a local microphone.
 
-        def callback(indata, frames, time_info, status):
-            # ── Wake-word gate ───────────────────────────────────────────────
-            # While asleep, the mic audio NEVER goes to Gemini (nothing is
-            # streamed, so JARVIS can't respond to speech not addressed to it and
-            # nothing leaves the machine). Frames are instead handed to the local
-            # detector, which runs its model in ITS OWN thread — the cost here is
-            # only a queue push, so the audio path is never slowed. When wake word
-            # is off (default) or we're awake, this is a single boolean check.
-            if self._wake_enabled and not self._awake:
-                det = self._wake_detector
-                if det is not None:
-                    det.feed(indata)
-                return
-            with self._speaking_lock:
-                jarvis_speaking = self._is_speaking
-
-            # ── Barge-in ─────────────────────────────────────────────────────
-            # While JARVIS talks the mic is not streamed, but it is still worth
-            # listening to locally: if the user starts speaking, cut the answer
-            # short the way a person would stop when interrupted.
-            #
-            # The whole difficulty is echo — on speakers the mic hears JARVIS.
-            # So the test is not "is the mic loud" but "is the mic louder than
-            # the echo of what we are playing right now", sustained long enough
-            # that a cough or a keystroke cannot trigger it.
-            if jarvis_speaking:
-                # Nothing is streamed while JARVIS talks.
-                #
-                # Interrupting by voice used to live here: `EchoGuard` can pick a
-                # user out from under our own echo, and `core/echo.py` still does
-                # that for the tail below. Re-enabling is small — classify each
-                # block here and call interrupt() after `required_blocks` of
-                # agreement — but it depends on the listener's room, so it stays
-                # out until it can be tried on real hardware.
-                return
-
-            # ── Echo tail ────────────────────────────────────────────────────
-            # The speaking flag has dropped but the speakers have not finished.
-            # Sending this to the model is how an assistant hears itself, decides
-            # it was addressed, and answers its own last sentence. The microphone
-            # stays OPEN — the guard only drops blocks that are our own voice, so
-            # replying the instant it stops still works.
-            if self._tail_active():
-                try:
-                    if not self._echo.is_user_speech(
-                            indata, SEND_SAMPLE_RATE, _pcm_level(indata)):
-                        return
-                    self._tail_until = 0.0      # a real voice ends the tail early
-                except Exception:
-                    return
-            elif self._echo._hist:
-                self._echo.reset()
-
-            # ── Push-to-talk ─────────────────────────────────────────────────
-            # When it is on the microphone is closed by default and the chord
-            # opens it, which is the whole point: nothing leaves the machine
-            # unless you are holding the key.
-            if self._ptt_enabled and not self._ptt_held:
-                return
-
-            if not self.ui.muted and not self._phone_active:
-                data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
-                # Feed the live mic level to the HUD so the waveform reacts to
-                # the user's actual voice while listening. Purely cosmetic — any
-                # failure here must never disturb the mic.
-                try:
-                    self.ui.set_audio_level(_pcm_level(indata))
-                except Exception:
-                    pass
-
-        try:
-            def _open_mic(dev):
-                return sd.InputStream(
-                    samplerate=SEND_SAMPLE_RATE,
-                    channels=CHANNELS,
-                    dtype="int16",
-                    blocksize=CHUNK_SIZE,
-                    device=dev,
-                    callback=callback,
-                )
-
-            # Which microphone. resolve() returns None for "system default" and
-            # for a saved device that is no longer present — so a headset
-            # unplugged since the last run falls back to the built-in mic
-            # instead of raising on startup and taking the session with it.
-            _mic_name = get_input_device()
-            _mic_dev  = audio_devices.resolve(_mic_name, "input")
-            if _mic_dev is not None:
-                print(f"[JARVIS] 🎤 Input device: {_mic_name}")
-            try:
-                _mic_stream = _open_mic(_mic_dev)
-            except Exception as _e:
-                # A device the picker listed but the driver will not open right
-                # now — exclusive mode, a webcam already in use, a virtual mic
-                # whose source went away. Chosen hardware failing must never
-                # mean the assistant cannot hear at all.
-                if _mic_dev is None:
-                    raise
-                print(f"[JARVIS] ⚠️  Mic '{_mic_name}' failed: {_e} — using default")
-                self.ui.write_log(
-                    f"SYS: Microphone '{_mic_name}' unavailable — using system default."
-                )
-                _mic_stream = _open_mic(None)
-
-            with _mic_stream:
-                print("[JARVIS] 🎤 Mic stream open")
-                while True:
-                    await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"[JARVIS] ❌ Mic: {e}")
-            raise
+        All interactive audio must arrive from an authenticated native companion
+        through the device mesh.  Keeping this task alive preserves the existing
+        Gemini Live task topology without touching host audio hardware.
+        """
+        print("[SERVER] Local microphone disabled; waiting for companion audio.")
+        while True:
+            await asyncio.sleep(3600)
 
     async def _flush_pending_vision(self) -> bool:
         """Send a captured frame immediately after its tool response.
@@ -1653,145 +1544,32 @@ class JarvisLive:
             raise
 
     async def _play_audio(self):
-        print("[JARVIS] 🔊 Play started")
+        """Relay model PCM only to the companion that owns the live interaction.
 
-        _spk_name = get_output_device()
-        _spk_dev  = audio_devices.resolve(_spk_name, "output")
-        if _spk_dev is not None:
-            print(f"[JARVIS] 🔊 Output device: {_spk_name}")
-
-        def _open_spk(dev):
-            st = sd.RawOutputStream(
-                samplerate=RECEIVE_SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype="int16",
-                blocksize=CHUNK_SIZE,
-                device=dev,
-            )
-            st.start()
-            return st
-
-        try:
-            stream = _open_spk(_spk_dev)
-        except Exception as _e:
-            # A chosen output that the host API accepts by name but refuses to
-            # open (exclusive mode, wrong sample rate, device asleep) must not
-            # cost the user their voice. Fall back to the default and say so.
-            if _spk_dev is None:
-                raise
-            print(f"[JARVIS] ⚠️  Output device '{_spk_name}' failed: {_e} — using default")
-            self.ui.write_log(f"SYS: Speaker '{_spk_name}' unavailable — using system default.")
-            stream = _open_spk(None)
-
-        # Ask the device how far behind the speakers actually are, rather than
-        # assuming. This is what the echo tail is sized from, so a machine with a
-        # large audio buffer gets a correspondingly longer guard — and one with a
-        # tiny buffer is not penalised with a delay it does not need.
-        try:
-            lat = float(getattr(stream, "latency", 0.0) or 0.0)
-            if 0.0 < lat < 1.0:
-                self._out_latency = lat
-            print(f"[JARVIS] 🔊 Output latency {self._out_latency*1000:.0f} ms "
-                  f"→ echo tail {(self._out_latency + _TAIL_MARGIN)*1000:.0f} ms")
-        except Exception:
-            pass
-
-        try:
-            while True:
+        The server deliberately has no speaker output.  This prevents a headless
+        host from speaking when Android/desktop companion is the active surface.
+        """
+        print("[SERVER] Local speaker disabled; companion audio relay active.")
+        while True:
+            try:
+                chunk = await asyncio.wait_for(self.audio_in_queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                if self._turn_done_event and self._turn_done_event.is_set() and self.audio_in_queue.empty():
+                    self.set_speaking(False)
+                    self._turn_done_event.clear()
+                continue
+            self.set_speaking(True)
+            batch = bytearray(chunk)
+            while len(batch) < 9600:
                 try:
-                    chunk = await asyncio.wait_for(
-                        self.audio_in_queue.get(),
-                        timeout=0.1
-                    )
-                except asyncio.TimeoutError:
-                    if (
-                        self._turn_done_event
-                        and self._turn_done_event.is_set()
-                        and self.audio_in_queue.empty()
-                    ):
-                        self.set_speaking(False)
-                        self._turn_done_event.clear()
-                    continue
-
-                self.set_speaking(True)
-
-                # Batch all immediately-available chunks into one write to reduce
-                # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
-                # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
-                batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
-
-                # Drive the HUD waveform and the avatar's mouth from JARVIS's
-                # own voice. The batch is up to 200 ms long, so we hand over a
-                # *schedule* of 20 ms viseme frames instead of a single averaged
-                # level and let the HUD play it out in step with the audio.
+                    batch.extend(self.audio_in_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            if self._dashboard:
                 try:
-                    pcm = np.frombuffer(bytes(batch), dtype=np.int16)
-                    hop = _VIS_HOP / RECEIVE_SAMPLE_RATE
-                    frames = _pcm_visemes(pcm, sr=RECEIVE_SAMPLE_RATE)
-                    # When does this batch become audible? The stream was
-                    # started at launch and its callback has been pulling
-                    # silence ever since, so the first bytes of a reply reach
-                    # the speaker about one callback period later — NOT one
-                    # buffer later. `stream.latency` reports the buffer's
-                    # capacity, which is how much can be queued ahead, and on
-                    # Windows that is commonly 300-500 ms. Anchoring on it put
-                    # the entire schedule a buffer late; that is the half second
-                    # of lag, and it grew with whatever the device reported.
-                    #
-                    # After the anchor nothing needs measuring: the device
-                    # consumes at exactly realtime, so each batch sounds one
-                    # batch-duration after the one before it. The cursor is
-                    # re-anchored only when it leaves the range physically
-                    # possible — behind `now` means the device drained and this
-                    # batch starts a fresh stretch of speech, while further
-                    # ahead than the buffer can hold means it has drifted.
-                    now = time.time()
-                    horizon = self._out_latency + _CURSOR_SLACK
-                    if not (now <= self._play_cursor <= now + horizon):
-                        self._play_cursor = now + _FIRST_SOUND
-                    at = self._play_cursor
-                    # Advance by the batch's own duration whether or not it
-                    # yielded frames, so a block too short to analyse cannot
-                    # shift everything after it out of step with the audio.
-                    self._play_cursor += pcm.size / RECEIVE_SAMPLE_RATE
-                    if frames:
-                        frames = self._visemes.frames(frames, hop)
-                        self.ui.push_visemes(frames, hop, at)
-                        # Barge-in needs to know what we are playing, not just
-                        # how loud: the guard subtracts this from the microphone.
-                        self._out_level = max(f[0] for f in frames)
-                        self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE,
-                                               self._out_level)
-                    else:
-                        lvl = _pcm_level(pcm)
-                        self.ui.set_audio_level(lvl)
-                        self._out_level = lvl
-                        self._echo.note_output(pcm, RECEIVE_SAMPLE_RATE, lvl)
-                except Exception:
-                    pass
-
-                if self._dashboard:
-                    try:
-                        await self._dashboard.send_device_audio(bytes(batch))
-                    except Exception:
-                        pass
-
-                try:
-                    await asyncio.to_thread(stream.write, bytes(batch))
-                except (RuntimeError, asyncio.CancelledError):
-                    break   # executor shutting down — exit cleanly
-        except Exception as e:
-            print(f"[JARVIS] ❌ Play: {e}")
-            raise
-        finally:
-            self.set_speaking(False)
-            stream.stop()
-            stream.close()
+                    await self._dashboard.send_device_audio(bytes(batch))
+                except Exception as exc:
+                    print(f"[SERVER] companion audio relay error: {exc}")
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
@@ -2366,239 +2144,133 @@ class JarvisLive:
 def _runtime_paths():
     runtime = BASE_DIR / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
-    return runtime / "background.pid", runtime / "error.log"
+    return runtime / "server.pid", runtime / "error.log"
 
 def _pid_alive(pid):
     try:
         if sys.platform == "win32":
             r = _subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=5)
             return str(pid) in r.stdout
-        os.kill(pid, 0)
-        return True
-    except Exception:
-        return False
+        os.kill(pid, 0); return True
+    except Exception: return False
 
-def _background_pid():
+def _server_pid():
     pidfile, _ = _runtime_paths()
     try:
-        pid = int(pidfile.read_text(encoding="utf-8").strip())
-        return pid if _pid_alive(pid) else None
-    except Exception:
-        return None
+        pid=int(pidfile.read_text(encoding="utf-8").strip())
+        if _pid_alive(pid): return pid
+        pidfile.unlink(missing_ok=True)
+    except Exception: pass
+    return None
 
-def _start_background():
+def _spawn_server():
     pidfile, logfile = _runtime_paths()
-    if (pid := _background_pid()):
-        print(f"JARVIS background is already running (PID {pid}).")
-        return
-    # The detached child installs its own error-only rotating stream. Keep the
-    # launcher completely detached from this terminal and do not persist normal
-    # stdout/status chatter.
-    kwargs = dict(stdin=_subprocess.DEVNULL, stdout=_subprocess.DEVNULL,
-                  stderr=_subprocess.DEVNULL, cwd=str(BASE_DIR))
-    if sys.platform == "win32":
-        kwargs["creationflags"] = _subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS | _subprocess.CREATE_NO_WINDOW
-    else:
-        kwargs["start_new_session"] = True
-    p = _subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--background-worker"], **kwargs)
-    pidfile.write_text(str(p.pid), encoding="utf-8")
-    print(f"JARVIS background started (PID {p.pid}). Terminal ini sekarang boleh ditutup.")
-    print("Hentikan dengan: python main.py --end-background")
-
-def _end_background():
-    import signal
-    pidfile, _ = _runtime_paths(); pid = _background_pid()
-    if not pid:
-        pidfile.unlink(missing_ok=True); print("JARVIS background is not running."); return
-    if sys.platform == "win32":
-        _subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
-    else:
-        os.kill(pid, signal.SIGTERM)
-    pidfile.unlink(missing_ok=True)
-    print(f"JARVIS background stopped (PID {pid}).")
-
-def _pair_code():
-    import urllib.request, json
-    try:
-        req = urllib.request.Request("http://127.0.0.1:8000/api/local/pairing/new", method="POST", headers={"X-Jarvis-Local":"1"})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode("utf-8"))
-        print(f"PAIR CODE: {data['code']} (valid 10 minutes)")
-        if data.get("url"): print(f"PAIR URL: {data['url']}")
-    except Exception as e:
-        print("JARVIS core tidak sedang aktif atau Pair service belum siap.")
-        print("Jalankan --background, --cli, atau --ui terlebih dahulu.")
-        print(f"Detail: {e}")
-
-
-def _install_background_error_log():
-    """Persist only error-like output for detached mode, with bounded rotation.
-
-    error.log is capped at 5 MiB and keeps three older generations. Normal
-    JARVIS status/output is discarded so a 24/7 process cannot grow the log
-    simply by staying healthy. Traceback continuation lines are retained once
-    an error header is seen.
-    """
-    import io
-    import threading as _threading
-
-    _, logfile = _runtime_paths()
-    max_bytes = 5 * 1024 * 1024
-    backups = 3
-    lock = _threading.RLock()
-    markers = (
-        "error", "exception", "traceback", "failed", "failure", "fatal",
-        "critical", "policy violation", "rejected", "unhandled",
-    )
-
-    def rotate_if_needed(extra):
+    if (pid := _server_pid()):
+        print(f"MARK LIV server already running (PID {pid}).")
         try:
-            size = logfile.stat().st_size if logfile.exists() else 0
-            if size + extra <= max_bytes:
-                return
-            oldest = logfile.with_name(logfile.name + f".{backups}")
-            oldest.unlink(missing_ok=True)
-            for n in range(backups - 1, 0, -1):
-                src = logfile.with_name(logfile.name + f".{n}")
-                if src.exists():
-                    src.replace(logfile.with_name(logfile.name + f".{n+1}"))
-            if logfile.exists():
-                logfile.replace(logfile.with_name(logfile.name + ".1"))
-        except Exception:
-            pass
+            import urllib.request as _ur, json as _json
+            req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
+            with _ur.urlopen(req,timeout=2) as r: data=_json.loads(r.read().decode("utf-8"))
+            print(f"Native companion Pair Code: {data['code']} (valid 10 minutes)")
+        except Exception: pass
+        return pid
+    log=open(logfile, "ab", buffering=0)
+    kwargs=dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
+    if sys.platform == "win32":
+        kwargs["creationflags"]=_subprocess.CREATE_NEW_PROCESS_GROUP|_subprocess.DETACHED_PROCESS|_subprocess.CREATE_NO_WINDOW
+    else: kwargs["start_new_session"]=True
+    p=_subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--server-worker"], **kwargs)
+    pidfile.write_text(str(p.pid), encoding="utf-8")
+    print(f"MARK LIV server started (PID {p.pid}).")
+    # A start command is also the only server-side pairing surface: no dashboard/CLI.
+    # Ask the worker for a short-lived native-companion code and print it once.
+    try:
+        import urllib.request as _ur, json as _json
+        for _ in range(30):
+            try:
+                req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
+                with _ur.urlopen(req,timeout=1) as r: data=_json.loads(r.read().decode("utf-8"))
+                print(f"Native companion Pair Code: {data['code']} (valid 10 minutes)")
+                break
+            except Exception: time.sleep(0.2)
+    except Exception: pass
+    return p.pid
 
-    class ErrorOnlyStream(io.TextIOBase):
-        def __init__(self):
-            self._buf = ""
-            self._trace = False
-        @property
-        def encoding(self): return "utf-8"
-        def writable(self): return True
-        def isatty(self): return False
-        def flush(self):
-            if self._buf:
-                self._emit(self._buf, final=True); self._buf = ""
-        def write(self, data):
-            if not data: return 0
-            self._buf += str(data)
-            while "\n" in self._buf:
-                line, self._buf = self._buf.split("\n", 1)
-                self._emit(line + "\n")
-            return len(data)
-        def _emit(self, line, final=False):
-            low = line.lower()
-            starts_error = any(m in low for m in markers)
-            continuation = self._trace and (
-                line.startswith((" ", "\t"))
-                or line.startswith(("During handling", "The above exception", "+-", "|"))
-                or starts_error
-                or not line.strip()
-            )
-            if starts_error:
-                self._trace = True
-            elif self._trace and not continuation:
-                self._trace = False
-            if not (starts_error or continuation):
-                return
-            stamp = datetime.now().isoformat(timespec="seconds")
-            payload = f"[{stamp}] {line}" if starts_error and not continuation else line
-            raw = payload.encode("utf-8", errors="replace")
-            with lock:
-                rotate_if_needed(len(raw))
-                try:
-                    with open(logfile, "ab") as f:
-                        f.write(raw)
-                except Exception:
-                    pass
+def _stop_server():
+    import signal
+    pidfile,_=_runtime_paths(); pid=_server_pid()
+    if not pid:
+        pidfile.unlink(missing_ok=True); print("MARK LIV server is not running."); return
+    if sys.platform == "win32": _subprocess.run(["taskkill","/PID",str(pid),"/T","/F"],capture_output=True,timeout=10)
+    else:
+        try: os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError: pass
+    pidfile.unlink(missing_ok=True); print(f"MARK LIV server stopped (PID {pid}).")
 
-    stream = ErrorOnlyStream()
-    sys.stdout = stream
-    sys.stderr = stream
+def _autostart_enable():
+    """Install per-user autostart without adding another runtime mode."""
+    py=str(Path(sys.executable).resolve()); main=str(Path(__file__).resolve())
+    if sys.platform == "win32":
+        name="MARK-LIV-Server"
+        cmd=f'"{py}" "{main}" --start'
+        r=_subprocess.run(["schtasks","/Create","/TN",name,"/SC","ONLOGON","/TR",cmd,"/F"],capture_output=True,text=True)
+        if r.returncode: raise RuntimeError(r.stderr.strip() or r.stdout.strip())
+    elif sys.platform == "darwin":
+        target=Path.home()/"Library/LaunchAgents/com.markliv.server.plist"; target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.markliv.server</string><key>ProgramArguments</key><array><string>{py}</string><string>{main}</string><string>--start</string></array><key>RunAtLoad</key><true/></dict></plist>',encoding="utf-8")
+        _subprocess.run(["launchctl","unload",str(target)],capture_output=True)
+        _subprocess.run(["launchctl","load",str(target)],check=True)
+    else:
+        target=Path.home()/".config/systemd/user/mark-liv.service"; target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text(f"[Unit]\nDescription=MARK LIV Server\n\n[Service]\nType=oneshot\nExecStart={py} {main} --start\nRemainAfterExit=yes\nExecStop={py} {main} --stop\n\n[Install]\nWantedBy=default.target\n",encoding="utf-8")
+        _subprocess.run(["systemctl","--user","daemon-reload"],check=True)
+        _subprocess.run(["systemctl","--user","enable","mark-liv.service"],check=True)
+    print("MARK LIV autostart enabled."); _spawn_server()
 
-    # Errors from fire-and-forget asyncio tasks must also be persisted instead
-    # of disappearing as an unobserved task exception.
-    def install_loop_handler(loop):
-        def handler(_loop, context):
-            exc = context.get("exception")
-            msg = context.get("message", "Unhandled asyncio error")
-            print(f"ERROR: {msg}", file=sys.stderr)
-            if exc is not None:
-                traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
-        loop.set_exception_handler(handler)
-    return install_loop_handler
+def _autostart_disable():
+    if sys.platform == "win32":
+        _subprocess.run(["schtasks","/Delete","/TN","MARK-LIV-Server","/F"],capture_output=True)
+    elif sys.platform == "darwin":
+        target=Path.home()/"Library/LaunchAgents/com.markliv.server.plist"
+        _subprocess.run(["launchctl","unload",str(target)],capture_output=True); target.unlink(missing_ok=True)
+    else:
+        _subprocess.run(["systemctl","--user","disable","mark-liv.service"],capture_output=True)
+        (Path.home()/".config/systemd/user/mark-liv.service").unlink(missing_ok=True)
+        _subprocess.run(["systemctl","--user","daemon-reload"],capture_output=True)
+    print("MARK LIV autostart disabled. Running server, if any, is left unchanged; use --stop to stop it.")
 
 def _runtime_mode(argv=None):
     import argparse
-    parser = argparse.ArgumentParser(description="JARVIS runtime")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--ui", action="store_true", help="desktop UI (default)")
-    group.add_argument("--cli", action="store_true", help="interactive terminal interface")
-    group.add_argument("--background", action="store_true", help="start detached background mode")
-    group.add_argument("--end-background", action="store_true", help="stop detached background mode")
-    group.add_argument("--background-status", action="store_true", help="show background status")
-    group.add_argument("--pair", action="store_true", help="get Pair Code from running JARVIS")
-    group.add_argument("--setup", action="store_true", help="configure JARVIS")
-    parser.add_argument("--background-worker", action="store_true", help=argparse.SUPPRESS)
-    args = parser.parse_args(argv)
-    if args.setup: return "setup"
-    if args.cli: return "cli"
-    if args.background: return "background"
-    if args.end_background: return "end-background"
-    if args.background_status: return "background-status"
-    if args.pair: return "pair"
-    if args.background_worker: return "background-worker"
-    return "ui"
+    parser=argparse.ArgumentParser(description="MARK LIV server")
+    g=parser.add_mutually_exclusive_group(required=True)
+    g.add_argument("--start",action="store_true",help="start server")
+    g.add_argument("--enable",action="store_true",help="enable autostart and start server")
+    g.add_argument("--stop",action="store_true",help="stop server")
+    g.add_argument("--disable",action="store_true",help="disable autostart")
+    g.add_argument("--server-worker",action="store_true",help=argparse.SUPPRESS)
+    a=parser.parse_args(argv)
+    if a.start:return "start"
+    if a.enable:return "enable"
+    if a.stop:return "stop"
+    if a.disable:return "disable"
+    return "worker"
 
 def main(argv=None):
-    mode = _runtime_mode(argv)
-    if mode == "setup":
-        from core.setup_config import interactive_setup
-        if not interactive_setup(force=True): raise SystemExit(1)
-        return
-    if mode == "background": _start_background(); return
-    if mode == "end-background": _end_background(); return
-    if mode == "background-status":
-        pid = _background_pid(); print(f"JARVIS background is running (PID {pid})." if pid else "JARVIS background is not running."); return
-    if mode == "pair": _pair_code(); return
-    if mode == "ui":
-        from ui import JarvisUI
-        ui = JarvisUI("face.png")
-        def runner():
-            ui.wait_for_api_key()
-            try: asyncio.run(JarvisLive(ui).run())
-            except KeyboardInterrupt: pass
-        threading.Thread(target=runner, daemon=True).start()
-        try:
-            from PyQt6.QtCore import QTimer
-            timer = QTimer(); timer.timeout.connect(lambda: None); timer.start(100); ui.root.mainloop()
-        except KeyboardInterrupt:
-            try: ui._app.quit()
-            except Exception: pass
-        return
-    # Detached mode must capture startup failures too (configuration, interface,
-    # JarvisLive construction), not only errors after the event loop starts.
-    install_loop_handler = _install_background_error_log() if mode == "background-worker" else None
-
-    from core.interfaces import HeadlessInterface
-    interface = HeadlessInterface(cli=(mode == "cli")); interface.wait_for_api_key(); jarvis = JarvisLive(interface)
-    if mode == "cli":
-        worker = threading.Thread(target=lambda: asyncio.run(jarvis.run()), daemon=True, name="jarvis-brain"); worker.start()
-        try: interface.run_cli()
-        except KeyboardInterrupt: pass
-        print("\\nCLI stopped."); return
-    pidfile, _ = _runtime_paths()
-    try:
-        pidfile.write_text(str(os.getpid()), encoding="utf-8")
-        async def _background_main():
-            install_loop_handler(asyncio.get_running_loop())
-            await jarvis.run()
-        asyncio.run(_background_main())
-    except KeyboardInterrupt:
-        pass
+    mode=_runtime_mode(argv)
+    if mode=="start": _spawn_server(); return
+    if mode=="stop": _stop_server(); return
+    if mode=="enable": _autostart_enable(); return
+    if mode=="disable": _autostart_disable(); return
+    from core.interfaces import ServerInterface
+    interface=ServerInterface(); interface.wait_for_api_key(); jarvis=JarvisLive(interface)
+    # Wake-word capture is a client concern in server-only mode; never open a server microphone.
+    jarvis._wake_enabled = False
+    jarvis._awake = True
+    pidfile,_=_runtime_paths(); pidfile.write_text(str(os.getpid()),encoding="utf-8")
+    try: asyncio.run(jarvis.run())
     finally:
         try:
-            if pidfile.exists() and pidfile.read_text().strip() == str(os.getpid()): pidfile.unlink()
+            if pidfile.exists() and pidfile.read_text().strip()==str(os.getpid()): pidfile.unlink()
         except Exception: pass
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
