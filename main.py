@@ -2033,12 +2033,17 @@ class JarvisLive:
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             self._dashboard.set_interrupt_callback(self.interrupt)
-            asyncio.create_task(self._dashboard.serve())
+            # Port ownership is a server prerequisite, not an optional dashboard
+            # detail.  Validate it synchronously before Gemini/audio tasks start so
+            # an accidental second worker cannot kill an otherwise healthy session.
+            self._dashboard.assert_port_available()
+            self._dashboard_task = asyncio.create_task(self._dashboard.serve())
             # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())
         except Exception as e:
-            print(f"[Dashboard] Disabled: {e}")
+            print(f"[Dashboard] Cannot start: {e}")
             self._dashboard = None
+            raise
 
         while True:
             try:
@@ -2164,8 +2169,15 @@ class JarvisLive:
                 # with the latest session-resumption handle instead of dumping a
                 # TaskGroup/1008 traceback.
                 if ("goaway" in _err_lower or "session durat" in _err_lower
-                        or ("1008" in _err_lower and "failed to close" in _err_lower)):
-                    print("[JARVIS] Live session duration reached — reconnecting.")
+                        or ("1008" in _err_lower and (
+                            "failed to close" in _err_lower
+                            or "operation was aborted" in _err_lower
+                        ))):
+                    # Gemini may surface normal Live-session rollover either as a
+                    # GoAway or as API/WebSocket 1008 "operation was aborted".
+                    # Preserve transcript/resumption state and reconnect quietly.
+                    print("[JARVIS] Live session rollover — reconnecting.")
+                    self._recovery_context_pending = bool(self._session_log)
                     self._conn_backoff = 0
                     continue
                 print(f"[JARVIS] Error ({type(e).__name__}): {e}")
@@ -2263,60 +2275,136 @@ def _runtime_paths():
 def _pid_alive(pid):
     try:
         if sys.platform == "win32":
-            r = _subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=5)
-            return str(pid) in r.stdout
-        os.kill(pid, 0); return True
-    except Exception: return False
+            r = _subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return r.returncode == 0 and r.stdout.strip() == str(int(pid))
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+def _is_markliv_worker(pid):
+    """Never terminate an unrelated process just because a stale PID file exists."""
+    try:
+        if sys.platform == "win32":
+            ps = (
+                f"$p=Get-CimInstance Win32_Process -Filter \\\"ProcessId={int(pid)}\\\" -ErrorAction SilentlyContinue; "
+                "$p.CommandLine"
+            )
+            r = _subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=5)
+            cmd = (r.stdout or "").lower().replace("/", "\\")
+        else:
+            r = _subprocess.run(["ps", "-p", str(int(pid)), "-o", "command="], capture_output=True, text=True, timeout=5)
+            cmd = (r.stdout or "").lower()
+        return "main.py" in cmd and "--server-worker" in cmd
+    except Exception:
+        return False
 
 def _server_pid():
     pidfile, _ = _runtime_paths()
     try:
-        pid=int(pidfile.read_text(encoding="utf-8").strip())
-        if _pid_alive(pid): return pid
+        pid = int(pidfile.read_text(encoding="utf-8").strip())
+        if _pid_alive(pid) and _is_markliv_worker(pid):
+            return pid
         pidfile.unlink(missing_ok=True)
-    except Exception: pass
+    except Exception:
+        pass
     return None
 
+def _local_server_ready(timeout=0.8):
+    try:
+        import urllib.request as _ur
+        # Any HTTP response proves that something owns MARK-LIV's HTTP listener;
+        # pairing itself remains protected by the local-only header.
+        with _ur.urlopen("http://127.0.0.1:8000/", timeout=timeout) as r:
+            return True
+    except Exception as exc:
+        # HTTPError still means the listener is alive.
+        try:
+            import urllib.error as _ue
+            return isinstance(exc, _ue.HTTPError)
+        except Exception:
+            return False
+
 def _spawn_server():
+    import time as _time
     pidfile, logfile = _runtime_paths()
     if (pid := _server_pid()):
         print(f"MARK LIV server already running (PID {pid}).")
         return pid
-    log=open(logfile, "ab", buffering=0)
-    kwargs=dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
+    # Do not overwrite lifecycle state if port 8000 belongs to another process.
+    if _local_server_ready():
+        print("MARK LIV cannot start: port 8000 is already in use. Stop the existing service first.")
+        return None
+    pidfile.unlink(missing_ok=True)
+    log = open(logfile, "ab", buffering=0)
+    kwargs = dict(stdin=_subprocess.DEVNULL, stdout=log, stderr=log, cwd=str(BASE_DIR))
     if sys.platform == "win32":
-        kwargs["creationflags"]=_subprocess.CREATE_NEW_PROCESS_GROUP|_subprocess.DETACHED_PROCESS|_subprocess.CREATE_NO_WINDOW
-    else: kwargs["start_new_session"]=True
-    p=_subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--server-worker"], **kwargs)
-    pidfile.write_text(str(p.pid), encoding="utf-8")
-    print(f"MARK LIV server started (PID {p.pid}).")
-    return p.pid
+        kwargs["creationflags"] = _subprocess.CREATE_NEW_PROCESS_GROUP | _subprocess.DETACHED_PROCESS | _subprocess.CREATE_NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+    p = _subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--server-worker"], **kwargs)
+    # The worker owns server.pid. The launcher must not race it by writing the file.
+    deadline = _time.monotonic() + 15.0
+    while _time.monotonic() < deadline:
+        if p.poll() is not None:
+            print(f"MARK LIV server failed to start (exit code {p.returncode}). Check runtime/error.log.")
+            return None
+        worker_pid = _server_pid()
+        if worker_pid and _local_server_ready():
+            print(f"MARK LIV server started (PID {worker_pid}).")
+            return worker_pid
+        _time.sleep(0.2)
+    print("MARK LIV server did not become ready within 15 seconds. Check runtime/error.log.")
+    return None
 
 
 def _pair_device():
     """Create a short-lived pairing code on an already running headless server."""
-    if not _server_pid():
+    if not _server_pid() or not _local_server_ready():
         print("MARK LIV server is not running. Start it first with --start.")
         return
     try:
         import urllib.request as _ur, json as _json
-        req=_ur.Request("http://127.0.0.1:8000/api/local/pairing/new",method="POST",headers={"X-Jarvis-Local":"1"})
-        with _ur.urlopen(req,timeout=3) as r: data=_json.loads(r.read().decode("utf-8"))
+        req = _ur.Request("http://127.0.0.1:8000/api/local/pairing/new", method="POST", headers={"X-Jarvis-Local": "1"})
+        with _ur.urlopen(req, timeout=3) as r:
+            data = _json.loads(r.read().decode("utf-8"))
         print(f"MARK LIV Pair Code: {data['code']}")
         print("Expires in: 10 minutes")
     except Exception as exc:
         print(f"Could not create Pair Code: {exc}")
 
 def _stop_server():
-    import signal
-    pidfile,_=_runtime_paths(); pid=_server_pid()
+    import signal, time as _time
+    pidfile, _ = _runtime_paths()
+    pid = _server_pid()
     if not pid:
-        pidfile.unlink(missing_ok=True); print("MARK LIV server is not running."); return
-    if sys.platform == "win32": _subprocess.run(["taskkill","/PID",str(pid),"/T","/F"],capture_output=True,timeout=10)
+        pidfile.unlink(missing_ok=True)
+        print("MARK LIV server is not running.")
+        return
+    if not _is_markliv_worker(pid):
+        print(f"Refusing to stop PID {pid}: it is not a MARK LIV server worker.")
+        return
+    if sys.platform == "win32":
+        r = _subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, timeout=10)
+        if r.returncode and _pid_alive(pid):
+            print(f"Could not stop MARK LIV server PID {pid}: {(r.stderr or r.stdout).strip()}")
+            return
     else:
-        try: os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError: pass
-    pidfile.unlink(missing_ok=True); print(f"MARK LIV server stopped (PID {pid}).")
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = _time.monotonic() + 5.0
+    while _time.monotonic() < deadline and _pid_alive(pid):
+        _time.sleep(0.1)
+    if _pid_alive(pid):
+        print(f"MARK LIV server PID {pid} did not stop cleanly.")
+        return
+    pidfile.unlink(missing_ok=True)
+    print(f"MARK LIV server stopped (PID {pid}).")
 
 def _autostart_enable():
     """Install per-user autostart without adding another runtime mode."""

@@ -1104,6 +1104,28 @@ class DashboardServer:
         finally:
             sock.close()
 
+    def assert_port_available(self) -> None:
+        """Fail before any companion/tunnel task is started when the HTTP port is owned.
+
+        A second MARK-LIV worker used to launch Uvicorn in a detached asyncio task.
+        Uvicorn then raised SystemExit(1) on EADDRINUSE, which cancelled the active
+        Gemini Live session as collateral damage.  Check synchronously so the duplicate
+        worker exits cleanly without touching the already-running server.
+        """
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(("0.0.0.0", PORT))
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (48, 98, 10048):
+                raise RuntimeError(
+                    f"MARK LIV HTTP port {PORT} is already in use. "
+                    "Another MARK LIV server may already be running; stop that instance before starting a second one."
+                ) from exc
+            raise
+        finally:
+            probe.close()
+
     async def serve(self) -> None:
         if not _DEPS_OK:
             print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
