@@ -2272,18 +2272,32 @@ def _spawn_server():
     else:
         kwargs["start_new_session"] = True
     p = _subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--server-worker"], **kwargs)
-    # The worker owns server.pid. The launcher must not race it by writing the file.
+    # Popen returns the actual --server-worker PID.  Startup success must track
+    # that worker lifecycle, not an HTTP endpoint: the dashboard/API can become
+    # ready slightly later while the long-lived worker is already healthy.
+    # The worker remains the owner of server.pid; wait only for that ownership
+    # hand-off and never report a false startup failure because HTTP is late.
     deadline = _time.monotonic() + 15.0
     while _time.monotonic() < deadline:
         if p.poll() is not None:
             print(f"MARK LIV server failed to start (exit code {p.returncode}). Check runtime/error.log.")
             return None
-        worker_pid = _server_pid()
-        if worker_pid and _local_server_ready():
-            print(f"MARK LIV server started (PID {worker_pid}).")
-            return worker_pid
+        file_pid = _read_pidfile()
+        if file_pid == p.pid and _pid_alive(p.pid):
+            print(f"MARK LIV server started (PID {p.pid}).")
+            return p.pid
         _time.sleep(0.2)
-    print("MARK LIV server did not become ready within 15 seconds. Check runtime/error.log.")
+    # A live worker is still a successful server start even if PID-file I/O was
+    # delayed/blocked.  Repair the local lifecycle state from the child we just
+    # created instead of spawning a duplicate on the next --start.
+    if p.poll() is None and _pid_alive(p.pid):
+        try:
+            pidfile.write_text(str(p.pid), encoding="utf-8")
+        except Exception:
+            pass
+        print(f"MARK LIV server started (PID {p.pid}).")
+        return p.pid
+    print("MARK LIV server failed to start. Check runtime/error.log.")
     return None
 
 
@@ -2310,9 +2324,13 @@ def _stop_server():
         pidfile.unlink(missing_ok=True)
         print("MARK LIV server is not running.")
         return
+    # The local HTTP identity is useful when available, but it must not be a
+    # prerequisite for stopping the worker: dashboard readiness and worker
+    # lifecycle are separate concerns.  Verify the OS process command line
+    # instead so a stale PID can never terminate an unrelated process.
     service_pid = _local_server_identity()
-    if service_pid != pid:
-        print(f"Refusing to stop PID {pid}: MARK LIV service identity could not be verified.")
+    if service_pid != pid and not _is_markliv_worker(pid):
+        print(f"Refusing to stop PID {pid}: process is not a MARK LIV server worker.")
         return
     if sys.platform == "win32":
         r = _subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, timeout=10)

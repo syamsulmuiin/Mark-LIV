@@ -17,6 +17,7 @@ import socket
 import string
 import time
 import json
+import os
 from pathlib import Path
 
 _DEPS_OK = False

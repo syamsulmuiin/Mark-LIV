@@ -72,7 +72,12 @@ def _nvml_gpu() -> float:
 def _get_gpu_usage() -> float:
     # pynvml — subprocess-free, works everywhere if installed
     try:
-        import pynvml  # type: ignore
+        # nvidia-ml-py exposes the ``pynvml`` module. Suppress the deprecation
+        # warning emitted only when an old standalone ``pynvml`` package is
+        # still present in an existing environment.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module=r"pynvml")
+            import pynvml  # type: ignore
         pynvml.nvmlInit()
         h = pynvml.nvmlDeviceGetHandleByIndex(0)
         return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
