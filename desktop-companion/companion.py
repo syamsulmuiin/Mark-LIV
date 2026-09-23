@@ -74,7 +74,7 @@ class App:
         if typ=='challenge':
             ch=m['challenge']; expected=self.st.get('server_key','')
             if not verify(expected,f"{self.st['device_id']}:{ch}".encode(),m.get('server_signature','')): self.note('Server identity verification failed'); self.disconnect(); return
-            self.ws.send(json.dumps({'type':'proof','signature':b64(priv(self.st).sign(ch.encode()))}))
+            self.ws.send(json.dumps({'type':'proof','signature':b64(priv(self.st).sign(ch.encode())),'capabilities':['jarvis.command','notifications.receive','open_url','app.launch','app.close','desktop.command','legacy.action']}))
         elif typ=='ready': self.root.after(0,lambda:self.status.set('Connected · voice on client')); self.start_audio()
         elif typ=='status':
             state=str(m.get('state','')).upper()

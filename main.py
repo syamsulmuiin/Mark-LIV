@@ -383,7 +383,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "device_id": {"type": "STRING", "description": "Target paired device id"},
+                "device_id": {"type": "STRING", "description": "Exact device_id returned by list_paired_devices, or its exact device name. Never invent a numeric id; call list_paired_devices first when the target is not the current companion."},
                 "capability": {"type": "STRING", "description": "Capability exposed by that device"},
                 "args": {
                     "type": "OBJECT",
@@ -1341,8 +1341,25 @@ class JarvisLive:
                 if not self._dashboard:
                     result = "Device mesh is unavailable."
                 else:
-                    reply = await self._dashboard.call_device(str(args.get("device_id", "")), str(args.get("capability", "")), args.get("args") or {})
-                    result = str(reply.get("result", reply)) if isinstance(reply, dict) else str(reply)
+                    selector = str(args.get("device_id", "")).strip()
+                    devices = self._dashboard._mesh.list_devices()
+                    online = set(self._dashboard._device_sockets)
+                    target = next((d for d in devices if d.get("device_id") == selector), None)
+                    if target is None:
+                        target = next((d for d in devices if str(d.get("name", "")).casefold() == selector.casefold()), None)
+                    # Older model turns sometimes used the visible list position ("1")
+                    # instead of the opaque device id. Resolve that safely only against
+                    # the current online paired-device list; never treat it as an id.
+                    if target is None and selector.isdigit():
+                        candidates = [d for d in devices if d.get("device_id") in online]
+                        pos = int(selector) - 1
+                        if 0 <= pos < len(candidates):
+                            target = candidates[pos]
+                    if target is None:
+                        result = f"Paired device {selector!r} was not found. Call list_paired_devices and use its exact device_id or name."
+                    else:
+                        reply = await self._dashboard.call_device(str(target.get("device_id")), str(args.get("capability", "")), args.get("args") or {})
+                        result = str(reply.get("result", reply)) if isinstance(reply, dict) else str(reply)
 
             elif name == "manage_monitor":
                 action = args.get("action", "").lower().strip()

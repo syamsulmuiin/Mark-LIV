@@ -838,6 +838,12 @@ class DashboardServer:
                 proof = await asyncio.wait_for(websocket.receive_json(), timeout=15)
                 if proof.get("type") != "proof" or not self._mesh.verify(rec["public_key"], challenge.encode(), proof.get("signature", "")):
                     await websocket.close(code=4003); return
+                # The signed proof authenticates this peer. Refresh its advertised
+                # execution capabilities on every connection so devices paired by an
+                # older build do not remain permanently stuck with stale permissions.
+                live_caps = proof.get("capabilities")
+                if isinstance(live_caps, list) and live_caps:
+                    rec = self._mesh.set_capabilities(device_id, [str(c) for c in live_caps if str(c).strip()])
                 self._device_sockets[device_id] = websocket
                 self._mesh.touch(device_id)
                 await websocket.send_json({"type": "ready", "capabilities": rec.get("capabilities", [])})
