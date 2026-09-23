@@ -605,6 +605,11 @@ class DashboardServer:
             if self._active_voice_device == device_id:
                 self._active_voice_device = None
 
+    @property
+    def active_voice_device(self) -> str | None:
+        """Companion that originated the current voice/text interaction."""
+        return self._active_voice_device
+
     async def call_device(self, device_id: str, capability: str, args: dict | None = None, timeout: float = 30.0):
         """Invoke an explicitly permitted capability on a connected paired node."""
         if not self._mesh.authorized(device_id, capability):

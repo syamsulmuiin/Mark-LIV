@@ -329,6 +329,23 @@ TOOL_DECLARATIONS = [
         "parameters": {"type": "OBJECT", "properties": {}}
     },
     {
+        "name": "call_current_device",
+        "description": (
+            "Control the companion device that is currently talking to JARVIS. Use this for requests such as "
+            "open WhatsApp, open Chrome, open Settings, lock this phone, or other actions on this/current device. "
+            "For opening an Android or desktop app use capability app.launch with args.app set to the natural app name. "
+            "Do not use server-local open_app for a request originating from a companion when the user means this device."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "capability": {"type": "STRING", "description": "Capability exposed by the current companion"},
+                "args": {"type": "OBJECT", "description": "Capability arguments; use an empty object when none are required"}
+            },
+            "required": ["capability"]
+        }
+    },
+    {
         "name": "call_paired_device",
         "description": (
             "Control an online trusted paired device. Use natural app names with app.launch: put the app name "
@@ -1270,6 +1287,17 @@ class JarvisLive:
                     online = set(self._dashboard._device_sockets)
                     for d in devices: d["online"] = d.get("device_id") in online
                     result = json.dumps(devices, ensure_ascii=False) if devices else "No paired devices."
+
+            elif name == "call_current_device":
+                if not self._dashboard:
+                    result = "Device mesh is unavailable."
+                else:
+                    device_id = self._dashboard.active_voice_device
+                    if not device_id:
+                        result = "No active companion device is associated with this request."
+                    else:
+                        reply = await self._dashboard.call_device(device_id, str(args.get("capability", "")), args.get("args") or {})
+                        result = str(reply.get("result", reply)) if isinstance(reply, dict) else str(reply)
 
             elif name == "call_paired_device":
                 if not self._dashboard:

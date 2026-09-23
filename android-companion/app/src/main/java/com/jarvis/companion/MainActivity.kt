@@ -41,12 +41,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var orb: JarvisOrbView
     private lateinit var transcript: TextView
     private lateinit var transcriptScroll: ScrollView
-    private lateinit var endConversation: Button
+    private lateinit var endConversation: ImageButton
     private lateinit var startConversation: Button
     private lateinit var phoneControl: ImageButton
     private var ws: WebSocket? = null
     private var recorder: AudioRecord? = null
     private var player: AudioTrack? = null
+    @Volatile private var micGeneration = 0L
+    private val micLock = Any()
     @Volatile private var micRunning = false
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
@@ -73,7 +75,7 @@ class MainActivity : AppCompatActivity() {
     private fun showPhoneControlMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             if (Build.VERSION.SDK_INT >= 29) setForceShowIcon(true)
-            menu.add(0, 1, 0, getString(R.string.enable_phone_control)).setIcon(android.R.drawable.ic_menu_manage)
+            menu.add(0, 1, 0, getString(R.string.enable_phone_control)).setIcon(R.drawable.ic_phone_control)
             setOnMenuItemClickListener { item ->
                 if (item.itemId == 1) {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -154,7 +156,7 @@ class MainActivity : AppCompatActivity() {
                     "challenge"->{ val ch=m.getString("challenge"); val serverKey=prefs.getString("server_key","")!!; if(!verify(serverKey,"$id:$ch".toByteArray(),m.optString("server_signature"))){ ui("Server identity verification failed"); w.close(4003,"bad server proof"); return }; w.send(JSONObject().put("type","proof").put("signature",sign(ch.toByteArray())).toString()) }
                     "ready"->{ runOnUiThread { endConversation.visibility=View.VISIBLE; startConversation.visibility=View.GONE }; setVoiceState("LISTENING"); startMic() }
                     "status"->{ val st=m.optString("state").uppercase(); if(st=="SPEAKING") stopMic() else if(st=="LISTENING"||st=="ACTIVE") startMic(); setVoiceState(if(st=="ACTIVE") "LISTENING" else st) }
-                    "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")); if(m.optString("speaker")=="jarvis") setVoiceState("LISTENING") }
+                    "log"->{ appendTranscript(m.optString("speaker"),m.optString("text")) }
                     "capability.call"->executeCapability(w,m)
                 }
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
@@ -166,16 +168,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun startMic(){
         if(ActivityCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){ ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.RECORD_AUDIO),42); return }
-        if(micRunning)return
-        val min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(2048)
-        recorder=AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2)
-        recorder?.startRecording(); micRunning=true
+        val localRecorder: AudioRecord
+        val generation: Long
+        synchronized(micLock){
+            if(micRunning) return
+            val min=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(2048)
+            localRecorder=AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2)
+            if(localRecorder.state != AudioRecord.STATE_INITIALIZED){ localRecorder.release(); ui("Microphone initialization failed"); return }
+            generation=++micGeneration
+            recorder=localRecorder
+            try { localRecorder.startRecording() } catch(e:Exception){ recorder=null; localRecorder.release(); ui("Microphone start failed: ${e.message}"); return }
+            micRunning=true
+        }
         Thread {
             val buf=ByteArray(1024)
-            while(micRunning){ val n=try{recorder?.read(buf,0,buf.size)?:-1}catch(_:Exception){-1}; if(n>0){ orb.audioLevel(pcmLevel(buf,n)); ws?.send(ByteString.of(*buf.copyOf(n))) } }
-        }.apply { name="JarvisPhoneMic"; isDaemon=true; start() }
+            while(micRunning && generation==micGeneration){
+                val n=try{localRecorder.read(buf,0,buf.size)}catch(_:Exception){-1}
+                if(n>0 && micRunning && generation==micGeneration){ orb.audioLevel(pcmLevel(buf,n)); ws?.send(ByteString.of(*buf.copyOf(n))) }
+            }
+        }.apply { name="JarvisPhoneMic-$generation"; isDaemon=true; start() }
     }
-    private fun stopMic(){ micRunning=false; try{recorder?.stop()}catch(_:Exception){}; recorder?.release(); recorder=null }
+    private fun stopMic(){
+        val old: AudioRecord?
+        synchronized(micLock){
+            if(!micRunning && recorder==null) return
+            micRunning=false
+            ++micGeneration
+            old=recorder
+            recorder=null
+        }
+        try{old?.stop()}catch(_:Exception){}
+        try{old?.release()}catch(_:Exception){}
+    }
     private fun playAudio(pcm:ByteArray){
         orb.audioLevel(pcmLevel(pcm,pcm.size))
         try {
