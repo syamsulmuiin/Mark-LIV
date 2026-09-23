@@ -340,7 +340,26 @@ TOOL_DECLARATIONS = [
             "type": "OBJECT",
             "properties": {
                 "capability": {"type": "STRING", "description": "Capability exposed by the current companion"},
-                "args": {"type": "OBJECT", "description": "Capability arguments; use an empty object when none are required"}
+                "args": {
+                    "type": "OBJECT",
+                    "description": "Arguments for the selected device capability.",
+                    "properties": {
+                        "app": {"type": "STRING", "description": "Natural application name, e.g. WhatsApp or Chrome"},
+                        "name": {"type": "STRING", "description": "Alternative natural application name"},
+                        "package": {"type": "STRING", "description": "Android package only when already known"},
+                        "url": {"type": "STRING", "description": "URL for open_url"},
+                        "page": {"type": "STRING", "description": "Android Settings page"},
+                        "section": {"type": "STRING", "description": "Alternative Android Settings section"},
+                        "text": {"type": "STRING", "description": "Text for UI text/click operations"},
+                        "target_text": {"type": "STRING", "description": "Target field label for android.ui.text"},
+                        "view_id": {"type": "STRING", "description": "Android accessibility view id"},
+                        "direction": {"type": "STRING", "description": "Scroll direction"},
+                        "action": {"type": "STRING", "description": "Action for android.ui.global or desktop.command"},
+                        "max_nodes": {"type": "INTEGER", "description": "Maximum accessibility nodes to inspect"},
+                        "tool": {"type": "STRING", "description": "Legacy desktop action tool name"},
+                        "parameters": {"type": "OBJECT", "description": "Arguments passed to a legacy desktop action", "properties": {}}
+                    }
+                }
             },
             "required": ["capability"]
         }
@@ -366,7 +385,26 @@ TOOL_DECLARATIONS = [
             "properties": {
                 "device_id": {"type": "STRING", "description": "Target paired device id"},
                 "capability": {"type": "STRING", "description": "Capability exposed by that device"},
-                "args": {"type": "OBJECT", "description": "Capability arguments; use an empty object when none are required"}
+                "args": {
+                    "type": "OBJECT",
+                    "description": "Arguments for the selected device capability.",
+                    "properties": {
+                        "app": {"type": "STRING", "description": "Natural application name, e.g. WhatsApp or Chrome"},
+                        "name": {"type": "STRING", "description": "Alternative natural application name"},
+                        "package": {"type": "STRING", "description": "Android package only when already known"},
+                        "url": {"type": "STRING", "description": "URL for open_url"},
+                        "page": {"type": "STRING", "description": "Android Settings page"},
+                        "section": {"type": "STRING", "description": "Alternative Android Settings section"},
+                        "text": {"type": "STRING", "description": "Text for UI text/click operations"},
+                        "target_text": {"type": "STRING", "description": "Target field label for android.ui.text"},
+                        "view_id": {"type": "STRING", "description": "Android accessibility view id"},
+                        "direction": {"type": "STRING", "description": "Scroll direction"},
+                        "action": {"type": "STRING", "description": "Action for android.ui.global or desktop.command"},
+                        "max_nodes": {"type": "INTEGER", "description": "Maximum accessibility nodes to inspect"},
+                        "tool": {"type": "STRING", "description": "Legacy desktop action tool name"},
+                        "parameters": {"type": "OBJECT", "description": "Arguments passed to a legacy desktop action", "properties": {}}
+                    }
+                }
             },
             "required": ["device_id", "capability"]
         }
