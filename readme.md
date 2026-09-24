@@ -148,5 +148,5 @@ Preserve existing behavior unless a change is explicitly requested. Fix root cau
 - Headless server does not emit unsolicited CPU/RAM voice alerts; system status remains available on demand.
 - Gemini side/diagnostic calls no longer open extra Live sessions that can consume Live quota or destabilize the interactive companion voice session.
 - Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
-- WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly.
+- WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly. Expected Live rollover conditions are logged concisely without the duplicate receive-task traceback; unexpected exceptions retain full tracebacks for diagnosis.
 - Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.

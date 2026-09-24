@@ -1754,8 +1754,24 @@ class JarvisLive:
                         )
                         await self._flush_pending_vision()
         except Exception as e:
+            # The receive task sees normal Gemini Live session rollover first.
+            # Let run() classify/reconnect it, but do not dump a traceback here;
+            # otherwise an expected 1008/GoAway/transport rollover is printed
+            # before the outer lifecycle handler can recognise it.
+            _recv_err = _exception_text(e).lower()
+            _expected_rollover = (
+                "goaway" in _recv_err
+                or "session durat" in _recv_err
+                or ("1008" in _recv_err and (
+                    "failed to close" in _recv_err
+                    or "operation was aborted" in _recv_err
+                ))
+                or "keepalive ping timeout" in _recv_err
+                or "timed out while closing connection" in _recv_err
+            )
             print(f"[JARVIS] ❌ Recv: {e}")
-            traceback.print_exc()
+            if not _expected_rollover:
+                traceback.print_exc()
             raise
 
     async def _play_audio(self):

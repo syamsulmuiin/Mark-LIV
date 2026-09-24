@@ -38,3 +38,10 @@ At minimum, compile changed Python modules with `python -m py_compile` and run Z
 - Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
 - WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly.
 - Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.
+
+## v28 — quiet expected Live rollover tracebacks
+
+- Suppresses the duplicate Python traceback emitted inside `_receive_audio()` for expected Gemini Live rollover conditions (`1008 operation was aborted`, GoAway/session-duration rollover, keepalive ping timeout, and close timeout).
+- The exception is still re-raised to the existing lifecycle handler, so reconnect and conversation-context recovery are unchanged.
+- Unexpected receive exceptions still print their traceback for debugging.
+- Offline/connect failures such as Windows `ConnectionRefusedError` are not reclassified by this patch.
