@@ -1356,7 +1356,7 @@ class JarvisLive:
                 if not self._dashboard:
                     result = "Device mesh is unavailable."
                 else:
-                    device_id = self._dashboard.active_voice_device
+                    device_id = self._dashboard.origin_device_id
                     if not device_id:
                         result = "No active companion device is associated with this request."
                     else:
@@ -1430,7 +1430,7 @@ class JarvisLive:
                 # Enforce that in code instead of trusting the model to always choose
                 # call_current_device.  Desktop companions can run the established
                 # legacy actions locally; Android app launches map to app.launch.
-                _origin = self._dashboard.active_voice_device if self._dashboard else None
+                _origin = self._dashboard.origin_device_id if self._dashboard else None
                 _last_user = next((x[5:].strip() for x in reversed(self._session_log) if x.startswith("User:")), "")
                 _explicit_server = bool(re.search(r"\b(server|host)\b", _last_user, re.IGNORECASE))
                 _device_local_actions = {

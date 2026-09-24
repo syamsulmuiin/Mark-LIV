@@ -480,6 +480,9 @@ class DashboardServer:
         self._device_sockets: dict[str, WebSocket] = {}
         self._device_pending_calls: dict[str, asyncio.Future] = {}
         self._active_voice_device: str | None = None
+        # Stable origin for device-local routing. Keep separate from the voice
+        # transport target so tool routing can never steal or clear audio state.
+        self._origin_device_id: str | None = None
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
         self.app                          = self._build_app()
@@ -592,12 +595,19 @@ class DashboardServer:
 
     async def send_device_audio(self, pcm: bytes) -> None:
         """Send voice only to the companion that owns the current interaction."""
+        # Voice output belongs to the companion that owns the live interaction.
+        # If the transport target was lost during a tool/reconnect boundary, the
+        # stable turn origin is the only safe fallback; never play on the server.
         device_id = self._active_voice_device
-        if not device_id:
-            return
+        if not device_id or device_id not in self._device_sockets:
+            origin = self._origin_device_id
+            if origin and origin in self._device_sockets:
+                device_id = origin
+                self._active_voice_device = origin
+            else:
+                return
         ws = self._device_sockets.get(device_id)
         if ws is None:
-            self._active_voice_device = None
             return
         try:
             await ws.send_bytes(pcm)
@@ -608,8 +618,13 @@ class DashboardServer:
 
     @property
     def active_voice_device(self) -> str | None:
-        """Companion that originated the current voice/text interaction."""
+        """Companion currently receiving interactive voice audio."""
         return self._active_voice_device
+
+    @property
+    def origin_device_id(self) -> str | None:
+        """Stable companion origin for the current interaction/tool routing."""
+        return self._origin_device_id
 
     async def call_device(self, device_id: str, capability: str, args: dict | None = None, timeout: float = 30.0):
         """Invoke an explicitly permitted capability on a connected paired node."""
@@ -861,6 +876,7 @@ class DashboardServer:
                         break
                     audio = packet.get("bytes")
                     if audio is not None:
+                        self._origin_device_id = device_id
                         self._active_voice_device = device_id
                         try:
                             self._phone_audio_queue.put_nowait({"data": audio, "mime_type": "audio/pcm;rate=16000"})
@@ -879,6 +895,7 @@ class DashboardServer:
                             await websocket.send_json({"type":"error","error":"capability denied"}); continue
                         text = str(msg.get("text") or "").strip()
                         if text:
+                            self._origin_device_id = device_id
                             self._active_voice_device = device_id
                             await self._command_queue.put(text)
                             if self._wake_callback: self._wake_callback()
@@ -898,6 +915,8 @@ class DashboardServer:
                     self._device_sockets.pop(device_id, None)
                 if self._active_voice_device == device_id:
                     self._active_voice_device = None
+                if self._origin_device_id == device_id:
+                    self._origin_device_id = None
 
         @app.post("/api/command")
         async def command(req: Request):

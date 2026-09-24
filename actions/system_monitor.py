@@ -1,3 +1,4 @@
+import warnings
 """
 System Monitor — background metric checks with voice alert support.
 Zero subprocess calls on all platforms — uses ctypes/pynvml/psutil/wmi only.
