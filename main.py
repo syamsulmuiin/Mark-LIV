@@ -381,8 +381,12 @@ TOOL_DECLARATIONS = [
             "For Android Settings use android.settings.open with optional args.page such as bluetooth, wifi, "
             "apps, accessibility, display, sound, location, security, battery, date/time, or keyboard. "
             "For any installed app, app.launch opens it by natural app name. On desktop companions app.close closes the named local application; on Android it leaves the current app and returns that device to Home because ordinary Android companions cannot force-stop arbitrary apps. Use desktop.command with args.action=lock to lock a desktop companion. On Windows/Linux/macOS companions, use capability legacy.action to run the established local MARK LIV tools without losing pre-refactor functionality. Pass args.tool as one of open_app, computer_control, computer_settings, desktop_control, file_controller, browser_control, screen_processor, send_message, or system_monitor, and put the original tool arguments in args.parameters. Use this for mouse/keyboard/window/settings/file/browser/screen/message/system operations on the target desktop. To reach a main menu, submenu, conversation, "
-            "button, field, or other in-app destination, launch the app then repeatedly use android.ui.inspect and "
-            "android.ui.click/android.ui.scroll/android.ui.text step by step until the requested destination is reached. "
+            "button, field, contact, or other in-app destination, use a generic inspect-reason-act-verify loop: "
+            "after app.launch call android.ui.inspect BEFORE choosing the next UI action; prefer visible search controls/fields over blind scrolling. "
+            "After every android.ui.click/android.ui.scroll/android.ui.text, inspect again to verify the expected screen change. "
+            "If a UI action fails, inspect again and try another visible node/navigation path before asking the user. "
+            "Do not claim Accessibility is disabled, Internet is down, or the device is offline unless a tool explicitly reports that cause. "
+            "Keep using the device the user explicitly selected; never offer or silently switch to the PC/server merely because an Android UI step failed. "
             "Use open_url when the user provides a supported deep link/URL shortcut. For Android Settings use "
             "android.settings.open for direct system pages, otherwise inspect/click through nested pages. Use "
             "android.screen.lock to lock the phone and android.screen.wake only to wake the display; never bypass PIN, "
@@ -1368,7 +1372,13 @@ class JarvisLive:
                     online = set(self._dashboard._device_sockets)
                     target = next((d for d in devices if d.get("device_id") == selector), None)
                     if target is None:
-                        target = next((d for d in devices if str(d.get("name", "")).casefold() == selector.casefold()), None)
+                        # Device names are human labels and may be duplicated after a
+                        # re-pair. Prefer the currently connected record so an older
+                        # offline record with the same phone name cannot shadow it.
+                        name_matches = [d for d in devices if str(d.get("name", "")).casefold() == selector.casefold()]
+                        target = next((d for d in name_matches if d.get("device_id") in online), None)
+                        if target is None and len(name_matches) == 1:
+                            target = name_matches[0]
                     # Older model turns sometimes used the visible list position ("1")
                     # instead of the opaque device id. Resolve that safely only against
                     # the current online paired-device list; never treat it as an id.
@@ -1414,21 +1424,61 @@ class JarvisLive:
                 asyncio.create_task(_do_shutdown())
 
             elif self._action_registry.has(name):
-                # file_processor: fall back to the currently-uploaded file when none is given
-                if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
-                    args["file_path"] = self.ui.current_file
-                _ctx = {"player": self.ui, "speak": self.speak,
-                        "response": None, "session_memory": None}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
-                result = r or "Done."
-                # web_search: mirror results to the on-screen content panel
-                if (name == "web_search" and r
-                        and not r.startswith("No results")
-                        and not r.startswith("Search failed")):
-                    _mode  = args.get("mode", "search")
-                    _query = args.get("query") or ", ".join(args.get("items", []))
-                    _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
-                    self.ui.show_content(_label, r)
+                # Origin-first execution guard.  A tool chosen from actions/* is a
+                # server-local implementation, but a request arriving from a companion
+                # means "this device" unless the user explicitly said server/host.
+                # Enforce that in code instead of trusting the model to always choose
+                # call_current_device.  Desktop companions can run the established
+                # legacy actions locally; Android app launches map to app.launch.
+                _origin = self._dashboard.active_voice_device if self._dashboard else None
+                _last_user = next((x[5:].strip() for x in reversed(self._session_log) if x.startswith("User:")), "")
+                _explicit_server = bool(re.search(r"\b(server|host)\b", _last_user, re.IGNORECASE))
+                _device_local_actions = {
+                    "open_app", "computer_control", "computer_settings", "desktop_control",
+                    "file_controller", "browser_control", "screen_processor", "send_message",
+                    "system_monitor",
+                }
+                if _origin and name in _device_local_actions and not _explicit_server:
+                    try:
+                        _rec = self._dashboard._mesh.get(_origin) or {}
+                        _caps = set(_rec.get("capabilities") or [])
+                        if name == "open_app" and "app.launch" in _caps:
+                            _app = args.get("app_name") or args.get("app") or args.get("name") or ""
+                            _reply = await self._dashboard.call_device(_origin, "app.launch", {"app": _app})
+                            result = str(_reply.get("result", _reply)) if isinstance(_reply, dict) else str(_reply)
+                        elif "legacy.action" in _caps:
+                            _reply = await self._dashboard.call_device(
+                                _origin, "legacy.action", {"tool": name, "parameters": args}
+                            )
+                            result = str(_reply.get("result", _reply)) if isinstance(_reply, dict) else str(_reply)
+                        else:
+                            # Do not silently fall through and execute the action on the
+                            # server.  Tell the model which current-device path to use so
+                            # Android UI workflows can continue through inspect/act/verify.
+                            result = (
+                                f"Origin companion {_origin} does not expose a direct mapping for server-local tool {name}. "
+                                "Do not run it on the server. Continue on the current companion with call_current_device "
+                                "and its advertised capabilities; for Android messaging open the app and use android.ui.inspect/text/click."
+                            )
+                    except Exception as _route_error:
+                        result = f"Origin-device routing failed: {_route_error}"
+                else:
+                    # file_processor: fall back to the currently-uploaded file when none is given
+                    if name == "file_processor" and not args.get("file_path") and self.ui.current_file:
+                        args["file_path"] = self.ui.current_file
+                    _ctx = {"player": self.ui, "speak": self.speak,
+                            "response": None, "session_memory": None}
+                    r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
+                    result = r or "Done."
+                    # web_search: mirror results to the on-screen content panel
+                    if (name == "web_search" and r
+                            and not r.startswith("No results")
+                            and not r.startswith("Search failed")):
+                        _mode  = args.get("mode", "search")
+                        _query = args.get("query") or ", ".join(args.get("items", []))
+                        _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
+                        self.ui.show_content(_label, r)
+
 
             else:
                 if self._plugin_registry.has(name):
