@@ -23,24 +23,10 @@ WHY THIS EXISTS
     NO SINGLE PLACE TO CHANGE.  A new model release meant editing sixteen files
     and hoping none were missed.
 
-THE LIVE MODEL DOES THIS WORK, AND IT LEADS THE LADDER
-    Not the user's conversation — a separate, throwaway session per call, so
-    nothing a plugin asks is ever heard by the person at the microphone.
-
-    It leads because of quota. This is a voice assistant; the Live API is the
-    dependency it already has, and it draws on a different pool from the text
-    models. On the free tier it is the TEXT pool that runs out, and when it does
-    every side call fails and the feature behind it dies with it. Putting Live
-    first means ordinary use stops spending the pool that runs dry.
-
-    The reply arrives through output_transcription, because these models refuse
-    response_modalities=["TEXT"] with a 1007 — they only speak. That sounds
-    fatal for structured output and is not: the transcription is the model's own
-    text of what it said, and it returned "Mum ❤ click here for contact info",
-    indented Python inside markdown fences, and src/utils/helpers_v2.py
-    character for character.
-
-    It cannot carry grounding metadata, so grounded web search stays on REST.
+SIDE CALL ISOLATION
+    One-shot helper/diagnostic calls use REST models, not extra Live sessions. The
+    interactive Live session belongs to the user conversation and must not compete
+    with background/helper work for Live quota or connection slots.
 
 THE LADDER, MEASURED
     Live, one throwaway session:
@@ -86,7 +72,8 @@ SEARCH = "search"  # grounded search — REST only, see below
 # A rung that means "ask the Live model instead", through a short throwaway
 # session rather than the REST text API.
 #
-# WHY IT LEADS
+# LEGACY LIVE FALLBACK SUPPORT
+#     Kept for compatibility with explicit callers; normal FAST/SMART ladders do not use it.
 #     This is a voice assistant: the Live API is the dependency it already has,
 #     and it draws on a DIFFERENT quota pool from the text models. On the free
 #     tier the text pool is the one that runs out — an afternoon of ordinary use
@@ -114,12 +101,12 @@ SEARCH = "search"  # grounded search — REST only, see below
 LIVE = "live"
 
 _LADDERS = {
-    FAST: (LIVE, "gemini-2.5-flash-lite", "gemini-2.5-flash"),
-    SMART: (LIVE, "gemini-2.5-flash", "gemini-2.5-flash-lite"),
+    FAST: ("gemini-flash-lite-latest", "gemini-flash-latest"),
+    SMART: ("gemini-flash-latest", "gemini-flash-lite-latest"),
     # Grounded search needs response.candidates[...].grounding_metadata, which a
     # Live turn does not produce. REST only, and it says so rather than silently
     # returning an answer with no sources behind it.
-    SEARCH: ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"),
+    SEARCH: ("gemini-flash-latest", "gemini-flash-lite-latest"),
 }
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is

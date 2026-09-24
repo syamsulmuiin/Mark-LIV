@@ -104,6 +104,8 @@ A request such as “Setiap pagi jam 7 sapa aku lalu bacakan berita terbaru” c
 
 `actions/self_repair_diagnostic.py` provides **read-only** self-repair diagnosis. It may inspect as many relevant project files as required by the dependency/root-cause path. There is no arbitrary total file-count limit; discovery proceeds in context-sized rounds until the relevant closure is reached.
 
+Diagnostic activation is **conversational first**. A vague statement such as “ada error” does not start self-repair automatically. JARVIS first acknowledges the issue and asks for the concrete symptom (or uses evidence the user already supplied), then runs the diagnostic only when the user explicitly asks to diagnose/check/debug/repair that concrete problem. Before starting, JARVIS states that the diagnostic is read-only. A server-side activation guard rejects accidental generic tool calls as a second safety layer.
+
 Diagnostic mode can report a root cause, files inspected, files that would need changes, proposed changes, validation plan, risk, and missing evidence. It deliberately has **no apply capability**. It cannot use this mode to edit/delete production source, install dependencies, restart the server, or commit/push changes. Saying “terapkan” does not bypass that restriction.
 
 Protected architecture invariants include: headless server operation; origin-first device routing; separation of `origin_device_id` and `active_voice_device`; companion-only voice output; preservation of Android/Windows/Linux/macOS capability paths; remote pairing support; and no unsolicited background news/time/briefing jobs.
@@ -140,3 +142,11 @@ For Android release signing, see `android-companion/SIGNING.md`.
 ## Development rule
 
 Preserve existing behavior unless a change is explicitly requested. Fix root causes with the smallest compatible patch. Device-specific fixes should not be copied to other companion platforms unless their implementation actually requires the same change.
+
+
+### v27 runtime stability
+- Headless server does not emit unsolicited CPU/RAM voice alerts; system status remains available on demand.
+- Gemini side/diagnostic calls no longer open extra Live sessions that can consume Live quota or destabilize the interactive companion voice session.
+- Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
+- WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly.
+- Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.

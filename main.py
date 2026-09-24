@@ -1287,7 +1287,38 @@ class JarvisLive:
         result = "Done."
 
         try:
-            if name == "current_datetime":
+            if name == "self_repair_diagnostic":
+                # Safety/UX gate: model routing alone must never turn a vague error
+                # observation into a long diagnostic tool run.  Require explicit
+                # diagnostic/repair intent in the user's actual latest utterance and
+                # enough symptom detail to diagnose something concrete.
+                _last_user = next((x[5:].strip() for x in reversed(self._session_log) if x.startswith("User:")), "")
+                _intent = bool(re.search(
+                    r"\b(diagnos(?:a|e|is|tic)?|debug|periksa|cek|check|inspect|telusuri|analisis|analis[ai]s|repair|fix|perbaiki)\b",
+                    _last_user, re.IGNORECASE))
+                _generic = bool(re.fullmatch(
+                    r"\s*(ada|terdapat|there(?:'s| is))?\s*(potential\s+)?(error|bug|masalah|problem)(\s+(nih|ini|lagi))?[.!?]*\s*",
+                    _last_user, re.IGNORECASE))
+                _problem = str(args.get("problem", "")).strip()
+                _invented_generic = _problem.casefold() in {
+                    "user noticed potential error and wants diagnosis",
+                    "user noticed an error and wants diagnosis",
+                    "potential error",
+                }
+                if not _intent or _generic or _invented_generic:
+                    result = (
+                        "Diagnostic was not started. The user has not yet provided explicit diagnostic intent "
+                        "with a concrete symptom. Respond conversationally first: acknowledge the issue, ask what "
+                        "failed or what they observed, and offer the read-only diagnostic. Do not call this tool "
+                        "again until the user explicitly asks to diagnose/check/debug/repair that concrete problem."
+                    )
+                else:
+                    _ctx = {"player": self.ui, "speak": self.speak,
+                            "response": None, "session_memory": None}
+                    r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
+                    result = r or "Done."
+
+            elif name == "current_datetime":
                 now = datetime.now().astimezone()
                 result = json.dumps({
                     "local_datetime": now.isoformat(timespec="seconds"),
@@ -2083,7 +2114,7 @@ class JarvisLive:
                     tg.create_task(self._listen_audio())
                     tg.create_task(self._receive_audio())
                     tg.create_task(self._play_audio())
-                    tg.create_task(self._run_system_monitor())
+                    # System monitoring remains available on demand; no unsolicited server alerts.
                     tg.create_task(self._run_background_monitor())
                     # Do not run unsolicited proactive check-ins. MARK-LIV stays idle
                     # unless the user speaks or a user-created scheduled workflow is due.
@@ -2145,7 +2176,9 @@ class JarvisLive:
                         or ("1008" in _err_lower and (
                             "failed to close" in _err_lower
                             or "operation was aborted" in _err_lower
-                        ))):
+                        ))
+                        or "keepalive ping timeout" in _err_lower
+                        or "timed out while closing connection" in _err_lower):
                     # Gemini may surface normal Live-session rollover either as a
                     # GoAway or as API/WebSocket 1008 "operation was aborted".
                     # Preserve transcript/resumption state and reconnect quietly.

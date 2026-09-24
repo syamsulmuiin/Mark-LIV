@@ -200,9 +200,12 @@ Return ONLY valid JSON with exactly these keys:
 TOOL = {
     "name": "self_repair_diagnostic",
     "description": (
-        "READ-ONLY diagnostic/dry-run self-repair for MARK-LIV itself. Use when the user asks JARVIS to diagnose, "
-        "inspect, debug, or propose a repair to JARVIS/MARK-LIV. It reads relevant source and proposes the smallest "
-        "repair but NEVER applies edits, deletes files, installs dependencies, restarts services, or commits/pushes."
+        "READ-ONLY diagnostic/dry-run self-repair for MARK-LIV itself. Call ONLY after the user explicitly asks to "
+        "diagnose/debug/check the cause/repair a concrete MARK-LIV problem. A vague statement such as 'there is an error', "
+        "'something seems wrong', or merely observing an exception is NOT authorization: converse first and ask what failed. "
+        "Before calling, tell the user briefly that the diagnostic is read-only. Never invent a generic problem just to call "
+        "this tool. It reads relevant source and proposes the smallest repair but NEVER applies edits, deletes files, "
+        "installs dependencies, restarts services, or commits/pushes."
     ),
     "parameters": {
         "type": "OBJECT",
