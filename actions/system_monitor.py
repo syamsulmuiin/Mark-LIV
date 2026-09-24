@@ -77,7 +77,7 @@ def _get_gpu_usage() -> float:
         # warning emitted only when an old standalone ``pynvml`` package is
         # still present in an existing environment.
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=FutureWarning, module=r"pynvml")
+            warnings.simplefilter("ignore", FutureWarning)
             import pynvml  # type: ignore
         pynvml.nvmlInit()
         h = pynvml.nvmlDeviceGetHandleByIndex(0)

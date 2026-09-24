@@ -616,6 +616,20 @@ def _is_reconnect_signal(exc: BaseException) -> bool:
     return False
 
 
+def _exception_text(exc: BaseException) -> str:
+    """Flatten TaskGroup/BaseExceptionGroup messages for transport classification.
+
+    Python 3.11 TaskGroup stringifies a group as only "unhandled errors in a
+    TaskGroup", hiding the child API/WebSocket error.  Transport rollover
+    detection must inspect the nested exception text as well.
+    """
+    parts = [str(exc)]
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            parts.append(_exception_text(sub))
+    return "\n".join(part for part in parts if part)
+
+
 def _keep_context_of(exc: BaseException) -> bool:
     """Read `keep_context` off a reconnect signal, unwrapping the group the
     TaskGroup put it in. Defaults to True: an unexpected shape must not silently
@@ -2071,7 +2085,8 @@ class JarvisLive:
                     tg.create_task(self._play_audio())
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_background_monitor())
-                    tg.create_task(self._run_proactive_mode())
+                    # Do not run unsolicited proactive check-ins. MARK-LIV stays idle
+                    # unless the user speaks or a user-created scheduled workflow is due.
                     tg.create_task(self._run_scheduled_workflows())
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
@@ -2105,11 +2120,13 @@ class JarvisLive:
                 # assistant would never come back at all: the feature meant to
                 # survive a reconnect would be the thing preventing one. Drop it
                 # once and let the next attempt start clean.
+                _flat_err = _exception_text(e)
+                _flat_lower = _flat_err.lower()
                 if _resumed_with and (
-                    "resum" in str(e).lower()
-                    or "handle" in str(e).lower()
-                    or "INVALID_ARGUMENT" in str(e)
-                    or "NOT_FOUND" in str(e)
+                    "resum" in _flat_lower
+                    or "handle" in _flat_lower
+                    or "invalid_argument" in _flat_lower
+                    or "not_found" in _flat_lower
                 ):
                     print("[JARVIS] 🔗 Resumption handle rejected — starting a fresh session")
                     self.ui.write_log("SYS: Session handle expired — recovering conversation context locally.")
@@ -2118,8 +2135,8 @@ class JarvisLive:
                     self._conn_backoff = 0
                     continue
 
-                err_str = str(e)
-                _err_lower = err_str.lower()
+                err_str = _flat_err
+                _err_lower = _flat_lower
                 # Gemini Live sends GoAway when a finite live session reaches its
                 # duration limit. Treat that as a normal rollover and reconnect
                 # with the latest session-resumption handle instead of dumping a

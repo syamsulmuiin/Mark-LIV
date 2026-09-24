@@ -1,27 +1,56 @@
-# MARK LIV — Server / Companion architecture
+# MARK-LIV server / companion architecture
 
-MARK LIV is now split into a headless server and installed native companions.
+This document describes the current architecture. Historical GUI/CLI/background runtime modes are obsolete and are not supported server access surfaces.
 
-## Server
-The server has no GUI, CLI conversation menu, local microphone, or local speaker. Runtime commands are only:
+## Headless server
 
-- `python main.py --start` — start the detached server and print a temporary native-companion Pair Code.
-- `python main.py --enable` — install per-user autostart and start the server.
-- `python main.py --stop` — stop the server.
-- `python main.py --disable` — remove autostart without silently changing other settings.
+The server owns Gemini Live orchestration, trusted-device routing, persistence/scheduling, server-side actions, and HTTP/WebSocket transport. It has no local microphone, speaker, conversational CLI, or desktop GUI.
 
-Browser dashboard/control routes are not a supported access surface. Pairing and control use the authenticated Ed25519 device mesh.
+Public administrative interface:
 
-## Clients
-- Android: `android-companion/`
-- Windows/Linux/macOS: `desktop-companion/`
+```text
+python main.py --start
+python main.py --stop
+python main.py --enable
+python main.py --disable
+python main.py --pair
+```
 
-Voice input/output exists on the active companion only. The server never opens its own microphone or speaker. The companion that sends the current voice/text interaction becomes the response-audio target, so speech is not broadcast to every paired device.
+`--server-worker` is an internal lifecycle flag.
 
-A client can ask MARK LIV to enumerate paired devices and target another paired device through the existing `list_paired_devices` / `call_paired_device` tool path. Server-side actions continue to execute on the server when requested through an authenticated client.
+## Companions
 
-## Pairing
-Start the server with `--start`; it prints a six-character Pair Code valid for ten minutes. Enter the server URL and that code in the installed companion.
+Android and desktop companions are the user-facing control/execution surfaces. Voice input/output is companion-only. Desktop companions carry the established local action runtime; Android exposes Android-native capabilities and optional Accessibility UI automation.
 
-## Legacy capability parity
-Desktop companions carry a local execution runtime containing the established MARK LIV device-side actions. The server routes these through the authenticated `legacy.action` capability. This preserves computer control/settings, desktop, file, browser, screen, messaging, monitoring, and application-launch behavior while keeping the server itself headless.
+## Origin-first routing
+
+Every companion-originated turn has an origin device identity. Unless the user explicitly names another target, device-local actions execute on that origin companion.
+
+Two states must remain separate:
+
+- `origin_device_id`: execution target for the current turn.
+- `active_voice_device`: interactive audio destination.
+
+`call_current_device` uses the turn origin. `call_paired_device` is for another explicitly targeted paired device. Device-name resolution prefers an online matching record and should resolve to the canonical paired UUID.
+
+## Voice lifecycle
+
+The server receives/forwards live-session audio but does not render audio. Interactive audio returns to the active voice companion. Command routing must never clear or repurpose voice state. Gemini session rollover/reconnect should preserve active conversational context rather than treating transport rollover as a completed conversation.
+
+## Device mesh and pairing
+
+Paired devices use Ed25519 identities, signed challenge/response, and explicit capabilities. Pairing is available through the configured remote endpoint (`https://auth.kasirdigital.web.id`) and supported local transport. `--pair` creates a short-lived Pair Code on an already-running server.
+
+Cloudflare transport does not replace application-level device authentication or capability authorization.
+
+## Android UI execution
+
+Android Accessibility is opt-in. UI automation follows `inspect -> act -> verify/recover`. Blind scrolling/clicking is not the default strategy. A failed UI operation is not evidence by itself that Internet connectivity or Accessibility is unavailable.
+
+## Scheduling/background behavior
+
+There is no default morning briefing, news poll, or time announcement. News/time are fetched on demand. The scheduler exists to execute workflows explicitly created by the user. Recurring workflow state is stored under `~/.jarvis/scheduled_workflows.json`.
+
+## Read-only self repair
+
+Diagnostic self-repair may traverse the complete relevant dependency path without a fixed total file limit. It cannot apply edits, delete source, install packages, restart services, or perform Git mutations. Architecture invariants above are part of its diagnostic safety boundary.
