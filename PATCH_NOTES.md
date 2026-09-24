@@ -45,3 +45,8 @@ At minimum, compile changed Python modules with `python -m py_compile` and run Z
 - The exception is still re-raised to the existing lifecycle handler, so reconnect and conversation-context recovery are unchanged.
 - Unexpected receive exceptions still print their traceback for debugging.
 - Offline/connect failures such as Windows `ConnectionRefusedError` are not reclassified by this patch.
+
+## v29 — quiet transient network recovery
+- Expected Gemini Live 1008/GoAway rollover no longer prints a receive-side error line or traceback; lifecycle reconnect remains unchanged.
+- Transient network failures (including Windows 1225 refused and 1236 aborted) no longer dump repeated tracebacks while offline; retry/backoff remains active.
+- Unexpected/non-network exceptions still print full tracebacks for diagnostics.

@@ -150,3 +150,6 @@ Preserve existing behavior unless a change is explicitly requested. Fix root cau
 - Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
 - WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly. Expected Live rollover conditions are logged concisely without the duplicate receive-task traceback; unexpected exceptions retain full tracebacks for diagnosis.
 - Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.
+
+### Runtime log behavior (v29)
+Expected Live-session rollover and temporary network loss are recovered through the normal reconnect path without traceback spam. Unexpected application errors still retain full tracebacks for diagnosis.

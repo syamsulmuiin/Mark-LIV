@@ -1769,8 +1769,8 @@ class JarvisLive:
                 or "keepalive ping timeout" in _recv_err
                 or "timed out while closing connection" in _recv_err
             )
-            print(f"[JARVIS] ❌ Recv: {e}")
             if not _expected_rollover:
+                print(f"[JARVIS] ❌ Recv: {e}")
                 traceback.print_exc()
             raise
 
@@ -2202,8 +2202,20 @@ class JarvisLive:
                     self._recovery_context_pending = bool(self._session_log)
                     self._conn_backoff = 0
                     continue
-                print(f"[JARVIS] Error ({type(e).__name__}): {e}")
-                traceback.print_exc()
+                # Transient network loss is an availability state, not a code
+                # failure.  Keep retry/backoff active without flooding error.log
+                # with a full traceback on every reconnect attempt.
+                _network_markers = (
+                    "timeouterror", "timed out", "getaddrinfo", "cancellederror",
+                    "connectionrefusederror", "connectionabortederror",
+                    "connectionreseterror", "connectionerror", "oserror",
+                    "cannot connect", "network is unreachable",
+                    "remote computer refused", "network connection was aborted",
+                )
+                _is_transient_network = any(k in _err_lower for k in _network_markers)
+                if not _is_transient_network:
+                    print(f"[JARVIS] Error ({type(e).__name__}): {e}")
+                    traceback.print_exc()
 
                 # Turn-taking / media / thinking knobs rejected by the server
                 # (preview API drift) — drop them first, because they are the
@@ -2260,10 +2272,7 @@ class JarvisLive:
                     continue
 
                 # Network / timeout errors — log clearly and back off
-                is_net_err = any(k in err_str for k in (
-                    "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
-                    "ConnectionRefusedError", "OSError", "Cannot connect",
-                ))
+                is_net_err = _is_transient_network
                 if is_net_err:
                     _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
                     self._conn_backoff = _conn_backoff
