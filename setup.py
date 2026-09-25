@@ -6,11 +6,10 @@ packages in requirements.txt carry `sys_platform` markers, so a macOS or Linux
 user never pulls Windows-only libraries (and vice-versa). Then it fetches the
 Playwright browsers needed for web automation (current-OS builds only).
 
-Two things it deliberately does NOT install:
-  * the optional local wake word ("Hey Jarvis") — one-click, opt-in, from
-    ⚙ → WAKE WORD inside the app;
-  * anything for the avatar — the holographic head renders in software on the
-    PyQt6 and numpy already listed here. No GPU, no OpenGL, no extra packages.
+This setup installs the headless server runtime only. It deliberately does NOT
+install desktop UI or local audio dependencies such as PyQt6 or sounddevice.
+Microphone capture, speaker playback, and desktop presentation belong to the
+companion clients. The optional local wake word is also a companion concern.
 """
 import platform
 import subprocess
@@ -61,7 +60,7 @@ def main() -> None:
     _check_python()
 
     # requirements.txt filters OS-specific extras by itself via pip markers.
-    _run("Installing Python dependencies (OS-specific extras auto-filtered)…",
+    _run("Installing headless server dependencies (OS-specific extras auto-filtered)…",
          [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.

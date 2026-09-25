@@ -45,13 +45,9 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-import sounddevice as sd
 import numpy as np
 from google import genai
 from google.genai import types
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ui import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     save_session_summary, pop_last_session,
@@ -79,7 +75,6 @@ from memory.config_manager     import (
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
-from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.viseme               import VisemeStream
@@ -1775,14 +1770,9 @@ class JarvisLive:
         )
         set_trim_notifier(self.ui.write_log)
 
-        # Tell the device picker the exact rates the streams open at, from the
-        # constants that actually open them — so it can never list a device that
-        # cannot be opened at them.
-        audio_devices.configure(SEND_SAMPLE_RATE, RECEIVE_SAMPLE_RATE)
-
-        # Enumerate audio devices off-thread. The settings drawer must never pay
-        # for host-API enumeration on the Qt thread.
-        audio_devices.prefetch()
+        # Server runtime is intentionally audio-device agnostic. Microphone capture
+        # and speaker playback belong to companion clients, so a headless server
+        # never enumerates or opens local audio hardware.
 
         # Start dashboard. Import/initialization dependencies are optional: if
         # they are unavailable, the core runtime must still be able to start.

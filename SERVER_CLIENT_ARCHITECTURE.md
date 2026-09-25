@@ -74,3 +74,8 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 ## Network configuration (v33)
 
 Server deployment endpoints and ports are edited in `config/network.json`. The desktop companion standalone runtime mirrors the same defaults in `desktop-companion/runtime/config/network.json`. Environment variables are optional deployment overrides; if absent, the JSON values are used, with built-in constants retained only as final safety defaults.
+
+
+## Headless server boundary
+
+The server does not enumerate or open microphone/speaker devices and does not depend on a desktop GUI toolkit. Companion clients own local audio capture, playback, and user-interface presentation. The server may process PCM data received from companions, but that does not require local audio hardware.

@@ -79,3 +79,14 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 - Environment variables are still supported only as optional highest-priority overrides.
 - Resolution order: environment override → JSON config → built-in safety default.
 - No runtime routing, pairing, voice, dashboard, or reconnect behavior was changed.
+
+
+## v34 — True headless server dependency split
+
+- Removed the server runtime's top-level `sounddevice` import.
+- Removed server-side audio-device configuration and enumeration. Microphone and speaker hardware are companion responsibilities.
+- Removed `PyQt6` and `sounddevice` from the root/server `requirements.txt`.
+- Kept desktop companion audio dependencies in `desktop-companion/requirements.txt`.
+- The server continues to process and relay companion PCM audio without opening local audio hardware.
+- No server GUI dependency is imported or installed on the server startup path.
+- No files were removed.

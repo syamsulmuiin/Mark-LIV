@@ -170,3 +170,10 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 ### Default network configuration (v33)
 
 `config/network.json` is now included in the package and is the normal place to edit MARK-LIV network deployment values. The shipped file preserves the existing deployment: `auth.kasirdigital.web.id`, dashboard `8000`, LAN HTTPS `8001`, discovery `37991`, and local host `127.0.0.1`. Environment variables remain optional overrides for special deployments; users who keep the existing deployment do not need to create any environment variables. The standalone desktop companion includes the same default file at `desktop-companion/runtime/config/network.json`. Resolution order remains: environment override → JSON config → built-in safety default.
+
+
+## Headless server dependencies
+
+The root MARK LIV installation is a headless server runtime. It does not require a local microphone, speaker, audio host API, display server, PyQt6, or `sounddevice`. Audio capture/playback and desktop presentation belong to companion clients.
+
+Install the server with `python setup.py`. Desktop companion dependencies remain isolated under `desktop-companion/`.
