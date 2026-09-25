@@ -100,18 +100,20 @@ SEARCH = "search"  # grounded search — REST only, see below
 #     on REST — see SEARCH.
 LIVE = "live"
 
+from core.model_config import get_live_model, get_text_model, get_text_fallback_model
+
 _LADDERS = {
-    FAST: ("gemini-flash-lite-latest", "gemini-flash-latest"),
-    SMART: ("gemini-flash-latest", "gemini-flash-lite-latest"),
+    FAST: (get_text_fallback_model(), get_text_model()),
+    SMART: (get_text_model(), get_text_fallback_model()),
     # Grounded search needs response.candidates[...].grounding_metadata, which a
     # Live turn does not produce. REST only, and it says so rather than silently
     # returning an answer with no sources behind it.
-    SEARCH: ("gemini-flash-latest", "gemini-flash-lite-latest"),
+    SEARCH: (get_text_model(), get_text_fallback_model()),
 }
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
 # only the fallback for when this module is imported without it (tests).
-_LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
+_LIVE_FALLBACK = get_live_model()
 
 # How many one-shot Live sessions may exist at once.
 #
@@ -220,7 +222,7 @@ class _Reply:
 
 def _live_model() -> str:
     """Whatever main.py is running, so upgrading the assistant upgrades this."""
-    return getattr(sys.modules.get("main"), "LIVE_MODEL", None) or _LIVE_FALLBACK
+    return get_live_model()
 
 
 def _to_live_parts(contents) -> list:

@@ -62,3 +62,7 @@ Diagnostic self-repair is user-initiated and conversational first: a vague error
 - Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
 - WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly.
 - Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.
+
+## Runtime module boundaries
+
+`main.py` remains the Live conversation orchestrator. Headless process lifecycle is isolated in `core/server_lifecycle.py`; Live-bound tool schemas are isolated in `core/live_tools.py`; model selection is centralized in `core/model_config.py`; and bounded worker stdout/stderr rotation is handled by `core/runtime_log.py`. This separation is structural only and does not move voice or device execution back onto the server.

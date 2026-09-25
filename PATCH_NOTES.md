@@ -50,3 +50,14 @@ At minimum, compile changed Python modules with `python -m py_compile` and run Z
 - Expected Gemini Live 1008/GoAway rollover no longer prints a receive-side error line or traceback; lifecycle reconnect remains unchanged.
 - Transient network failures (including Windows 1225 refused and 1236 aborted) no longer dump repeated tracebacks while offline; retry/backoff remains active.
 - Unexpected/non-network exceptions still print full tracebacks for diagnostics.
+
+## v30 — runtime modularization, centralized model config, bounded logs
+
+- Reduced `main.py` from 2,548 to about 2,063 lines without changing Live-session behavior.
+- Moved headless server lifecycle/admin CLI helpers to `core/server_lifecycle.py`.
+- Moved Live-bound tool schemas to `core/live_tools.py`; file-backed actions remain auto-discovered from `actions/*.py`.
+- Added `core/model_config.py` as the server-side source of truth for Gemini model identifiers. Optional environment overrides: `MARK_LIV_LIVE_MODEL`, `MARK_LIV_TEXT_MODEL`, `MARK_LIV_TEXT_FALLBACK_MODEL`.
+- Kept the desktop companion standalone by mirroring the same model-config module inside its packaged runtime; Android does not embed Gemini model identifiers.
+- Added `core/runtime_log.py`. The server worker now owns `runtime/error.log` and rotates it at 5 MiB with five backups by default instead of allowing one file to grow forever. Optional overrides: `MARK_LIV_LOG_MAX_BYTES` and `MARK_LIV_LOG_BACKUPS`.
+- The launcher no longer leaves an inherited Windows file handle on `error.log`, allowing atomic rollover while the worker is running.
+- No user-facing features, routing behavior, voice behavior, reconnect policy, or scheduling cadence were changed.
