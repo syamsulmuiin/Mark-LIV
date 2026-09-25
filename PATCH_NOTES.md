@@ -61,3 +61,9 @@ At minimum, compile changed Python modules with `python -m py_compile` and run Z
 - Added `core/runtime_log.py`. The server worker now owns `runtime/error.log` and rotates it at 5 MiB with five backups by default instead of allowing one file to grow forever. Optional overrides: `MARK_LIV_LOG_MAX_BYTES` and `MARK_LIV_LOG_BACKUPS`.
 - The launcher no longer leaves an inherited Windows file handle on `error.log`, allowing atomic rollover while the worker is running.
 - No user-facing features, routing behavior, voice behavior, reconnect policy, or scheduling cadence were changed.
+
+## v31 — Optional dashboard dependency startup fix
+- Dashboard import/initialization failures no longer terminate the core JARVIS runtime.
+- Missing optional dashboard dependencies now disable the dashboard and allow the core runtime to continue.
+- Dashboard port ownership conflicts remain fatal intentionally, preserving the single-server-worker protection.
+- No companion protocol, voice routing, Gemini lifecycle, scheduling, or tool behavior was changed.

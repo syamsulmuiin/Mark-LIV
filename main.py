@@ -1784,23 +1784,30 @@ class JarvisLive:
         # for host-API enumeration on the Qt thread.
         audio_devices.prefetch()
 
-        # Start dashboard (optional — needs: pip install fastapi "uvicorn[standard]" cryptography)
+        # Start dashboard. Import/initialization dependencies are optional: if
+        # they are unavailable, the core runtime must still be able to start.
+        # A port ownership conflict is different: it means another server worker
+        # already owns the configured endpoint, so keep that single-instance guard
+        # fatal instead of silently starting a duplicate worker.
         try:
             from dashboard.server import DashboardServer
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             self._dashboard.set_interrupt_callback(self.interrupt)
-            # Port ownership is a server prerequisite, not an optional dashboard
-            # detail.  Validate it synchronously before Gemini/audio tasks start so
-            # an accidental second worker cannot kill an otherwise healthy session.
-            self._dashboard.assert_port_available()
+        except Exception as e:
+            print(f"[Dashboard] Disabled: {e}")
+            self._dashboard = None
+
+        if self._dashboard is not None:
+            try:
+                self._dashboard.assert_port_available()
+            except Exception as e:
+                print(f"[Dashboard] Cannot start: {e}")
+                self._dashboard = None
+                raise
             self._dashboard_task = asyncio.create_task(self._dashboard.serve())
             # Runs for the whole lifetime, not just inside an active session
             asyncio.create_task(self._process_dashboard_commands())
-        except Exception as e:
-            print(f"[Dashboard] Cannot start: {e}")
-            self._dashboard = None
-            raise
 
         while True:
             try:

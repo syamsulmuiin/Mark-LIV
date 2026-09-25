@@ -159,3 +159,6 @@ Expected Live-session rollover and temporary network loss are recovered through 
 The headless entry point is intentionally thin: server start/stop/enable/disable/pair lifecycle code lives in `core/server_lifecycle.py`, Live-only tool declarations live in `core/live_tools.py`, and provider model identifiers live in `core/model_config.py`. Change the default Gemini model there once, or override it with `MARK_LIV_LIVE_MODEL` / `MARK_LIV_TEXT_MODEL` / `MARK_LIV_TEXT_FALLBACK_MODEL`.
 
 Long-running server output is bounded. `runtime/error.log` rotates by size (5 MiB, five backups by default) through `core/runtime_log.py`. Deployments can change the limits with `MARK_LIV_LOG_MAX_BYTES` and `MARK_LIV_LOG_BACKUPS`.
+
+### Optional dashboard dependencies
+The core runtime can start when dashboard import or initialization dependencies are unavailable; the dashboard is disabled and the reason is logged. A dashboard port ownership conflict remains fatal because it indicates a duplicate server worker and protects the single-instance server lifecycle.
