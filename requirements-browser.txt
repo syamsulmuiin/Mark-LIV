@@ -1,0 +1,3 @@
+# Optional server-side browser automation.
+# Install only when this machine is intentionally used for browser automation.
+playwright>=1.40,<2

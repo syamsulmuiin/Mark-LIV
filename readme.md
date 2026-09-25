@@ -182,3 +182,11 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 The root MARK LIV installation is a headless server runtime. It does not require a local microphone, speaker, audio host API, display server, PyQt6, or `sounddevice`. Audio capture/playback and desktop presentation belong to companion clients.
 
 Install the server with `python setup.py`. Desktop companion dependencies remain isolated under `desktop-companion/`.
+
+### Linux and Armbian server installation
+
+The root installer is a headless-server installer. It does not install desktop GUI, local audio, camera, screen-capture, keyboard/mouse-control, or desktop-window packages. On Linux, including Armbian, `setup.py` creates and uses a project-local `.venv` when the current interpreter is not already inside a virtual environment. This avoids modifying an externally managed system Python (PEP 668).
+
+Common `x86_64` and `aarch64/arm64` Linux systems are detected explicitly. Playwright and its browser binaries are no longer installed automatically on the server. If server-side browser automation is intentionally required, install `requirements-browser.txt` separately on a platform supported by Playwright.
+
+Desktop-only dependencies remain under `desktop-companion/requirements.txt` and must not be installed on a headless server merely to start MARK LIV.

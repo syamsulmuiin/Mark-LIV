@@ -1,125 +1,119 @@
-"""
-MARK LIV — one-time setup.
+"""MARK LIV headless server setup.
 
-Installs the Python dependencies for THIS operating system only: the OS-specific
-packages in requirements.txt carry `sys_platform` markers, so a macOS or Linux
-user never pulls Windows-only libraries (and vice-versa). Then it fetches the
-Playwright browsers needed for web automation (current-OS builds only).
+The server installer is intentionally independent from desktop audio, GUI, screen,
+camera, and input-control packages. It supports the common Windows, macOS, and
+Linux CPU families used by MARK LIV, including Linux ARM64/aarch64 devices such
+as Armbian boards.
 
-This setup installs the headless server runtime only. It deliberately does NOT
-install desktop UI or local audio dependencies such as PyQt6 or sounddevice.
-Microphone capture, speaker playback, and desktop presentation belong to the
-companion clients. The optional local wake word is also a companion concern.
+On Linux, setup uses a project-local virtual environment when the current Python
+is not already inside one. This avoids Debian/Ubuntu/Armbian PEP 668
+"externally-managed-environment" failures without modifying the system Python.
 """
+from __future__ import annotations
+
+import os
 import platform
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
-OS = platform.system()  # "Windows" | "Darwin" | "Linux"
+OS = platform.system()
+ARCH = platform.machine().lower()
 HERE = Path(__file__).resolve().parent
+VENV_DIR = HERE / ".venv"
+MIN_PY = (3, 11)
+MAX_TESTED_PY = (3, 13)
 
-MIN_PY = (3, 11)        # hard floor: below this the syntax used here won't parse
-MAX_PY = (3, 13)        # highest version this is actually tested on
+_ARCH_ALIASES = {
+    "amd64": "x86_64", "x86_64": "x86_64",
+    "arm64": "arm64", "aarch64": "arm64",
+    "armv7l": "armv7", "armv7": "armv7",
+}
 
 
 def _run(label: str, args: list[str]) -> None:
-    print(f"\n▶ {label}")
-    subprocess.run(args, check=True)
+    print(f"\n[Setup] {label}")
+    subprocess.run(args, check=True, cwd=HERE)
+
+
+def _normalized_arch() -> str:
+    return _ARCH_ALIASES.get(ARCH, ARCH or "unknown")
+
+
+def _in_venv() -> bool:
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+
+def _venv_python() -> Path:
+    return VENV_DIR / ("Scripts/python.exe" if OS == "Windows" else "bin/python")
 
 
 def _check_python() -> None:
-    """Fail immediately and clearly rather than deep inside a pip resolver.
+    version = sys.version_info[:2]
+    if version < MIN_PY:
+        raise SystemExit(
+            f"MARK LIV requires Python {MIN_PY[0]}.{MIN_PY[1]} or newer; "
+            f"detected {version[0]}.{version[1]}."
+        )
+    if version > MAX_TESTED_PY:
+        print(
+            f"[Setup] Warning: Python {version[0]}.{version[1]} is newer than "
+            f"the latest tested version {MAX_TESTED_PY[0]}.{MAX_TESTED_PY[1]}."
+        )
 
-    A wrong interpreter is the single most common way this install goes sideways,
-    and the error it produces on its own names a wheel, not the real problem.
-    """
-    v = sys.version_info[:2]
-    if v > MAX_PY:
-        # Newer is a warning, not a wall. Turning away someone who installed
-        # today's Python is a worse first impression than a version that
-        # turns out to work fine, and if a wheel really is missing pip says
-        # so plainly.
-        print(f"\n⚠️  Python {v[0]}.{v[1]} is newer than the "
-              f"{MAX_PY[0]}.{MAX_PY[1]} this is tested on. Continuing — if a "
-              f"package has no wheel yet, install Python "
-              f"{MAX_PY[0]}.{MAX_PY[1]} and run setup with that.")
+
+def _ensure_linux_venv() -> None:
+    if OS != "Linux" or _in_venv() or os.environ.get("MARK_LIV_SETUP_IN_VENV") == "1":
         return
-    if v < MIN_PY:
-        print(f"\n❌ Python {v[0]}.{v[1]} detected — MARK LIV needs at "
-              f"least Python {MIN_PY[0]}.{MIN_PY[1]}.")
-        print("   Install a supported version and run setup with it, e.g.:")
-        print(f"     py -{MIN_PY[0]}.{MIN_PY[1]} setup.py        (Windows)")
-        print(f"     python{MIN_PY[0]}.{MIN_PY[1]} setup.py      (macOS / Linux)")
-        sys.exit(1)
+    python = _venv_python()
+    if not python.exists():
+        print("[Setup] Creating project-local virtual environment at .venv ...")
+        try:
+            venv.EnvBuilder(with_pip=True).create(VENV_DIR)
+        except Exception as exc:
+            raise SystemExit(
+                "Unable to create .venv. On Debian/Ubuntu/Armbian install the "
+                "matching python3-venv package, then run setup.py again. "
+                f"Details: {exc}"
+            ) from exc
+    env = os.environ.copy()
+    env["MARK_LIV_SETUP_IN_VENV"] = "1"
+    print(f"[Setup] Continuing inside {python}")
+    result = subprocess.run([str(python), str(HERE / "setup.py")], cwd=HERE, env=env)
+    raise SystemExit(result.returncode)
 
 
 def main() -> None:
-    print(f"⚙  MARK LIV setup — detected OS: {OS or 'unknown'}, "
-          f"Python {sys.version_info[0]}.{sys.version_info[1]}")
+    print(
+        f"[Setup] MARK LIV headless server | OS={OS or 'unknown'} | "
+        f"architecture={_normalized_arch()} | "
+        f"Python={sys.version_info[0]}.{sys.version_info[1]}"
+    )
     _check_python()
+    _ensure_linux_venv()
 
-    # requirements.txt filters OS-specific extras by itself via pip markers.
-    _run("Installing headless server dependencies (OS-specific extras auto-filtered)…",
-         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+    _run("Upgrading packaging tools", [sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    _run("Installing headless server dependencies", [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-    # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
-    # (Safari automation additionally needs: python -m playwright install webkit)
-    # Not fatal: these are a few hundred megabytes from a CDN that a corporate
-    # network or a flaky connection can refuse, and everything except browser
-    # automation works without them. Failing the whole install there would send
-    # a user away from a working app.
-    try:
-        _run("Installing Playwright browsers (chromium + firefox)…",
-             [sys.executable, "-m", "playwright", "install", "chromium", "firefox"])
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"\n⚠️  Playwright browsers were not installed ({e}).")
-        print("    Everything except browser automation works. Retry later with:")
-        print(f'    {sys.executable} -m playwright install chromium firefox')
+    # Browser automation is optional on the headless server. In particular,
+    # Playwright browser binaries are not forced onto ARM/Armbian systems.
+    # Install the optional extra explicitly only when server-side browser
+    # automation is required and supported by the target platform.
 
-
-    # One setup path for all runtimes. This is the same configuration used by
-    # `python main.py --setup`; setup.py only adds dependency installation first.
     from core.setup_config import configured, interactive_setup
     if not configured():
         if not interactive_setup(force=True):
-            print("\n❌ JARVIS configuration was not completed.")
-            sys.exit(1)
+            raise SystemExit("JARVIS configuration was not completed.")
     else:
-        print("\n✓ Existing JARVIS configuration found; Gemini key is kept unchanged.")
+        print("[Setup] Existing JARVIS configuration found; Gemini key is unchanged.")
 
-    # ── OS-specific post-install notes ────────────────────────────────────────
-    if OS == "Windows":
-        try:
-            import win32com.client  # noqa: F401
-        except ImportError:
-            postinstall = Path(sys.executable).parent / "Scripts" / "pywin32_postinstall.py"
-            print(
-                "\n⚠️  pywin32 did not register correctly — desktop-shortcut "
-                "creation will use a slower fallback. To fix it, run:\n"
-                f'    "{sys.executable}" -m pip install --force-reinstall pywin32\n'
-                f'    "{sys.executable}" "{postinstall}" -install'
-            )
-    elif OS == "Linux":
-        print(
-            "\nℹ️  Linux note — a few voice-controlled OS actions shell out to "
-            "native tools. Install the ones you'll use via your package manager:\n"
-            "    • volume      → pulseaudio-utils   (pactl)\n"
-            "    • brightness  → brightnessctl\n"
-            "    • reminders   → systemd (systemd-run) or 'at'\n"
-            "    • open URLs   → xdg-utils          (xdg-open)"
-        )
-    elif OS == "Darwin":
-        print(
-            "\nℹ️  macOS note — volume, brightness and reminders use the built-in "
-            "'osascript' / LaunchAgents, so no extra tools are required.\n"
-            "    For Safari automation only: python -m playwright install webkit"
-        )
-
-    print("\n✅ Setup complete!")
-    print("   1) Start server:       python main.py --start")
-    print("   2) Enable autostart:   python main.py --enable")
-    print("   3) Install a companion from android-companion/ or desktop-companion/.")
+    python_cmd = str(_venv_python()) if OS == "Linux" and _venv_python().exists() else sys.executable
+    print("\n[Setup] Setup complete.")
+    print(f'  Start server:     "{python_cmd}" main.py --start')
+    print(f'  Enable autostart: "{python_cmd}" main.py --enable')
+    print("  Install a companion separately on the device that provides UI/audio/control.")
+    print("  Optional server browser automation: pip install -r requirements-browser.txt")
 
 
 if __name__ == "__main__":

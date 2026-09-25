@@ -99,3 +99,13 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 - Moved non-English diagnostic input aliases out of `main.py` into `core/language_compat.py`.
 - Non-English literals in `core/language_compat.py` are intentional compatibility data only; they preserve natural-language command recognition and are not project-facing documentation, comments, logs, prompts, or UI text.
 - Runtime behavior, routing, voice, companion execution, and self-repair safety semantics are unchanged.
+
+## v36 — Cross-platform headless server setup
+
+- Added OS and CPU-architecture reporting, including normalized ARM64/aarch64 detection.
+- Linux setup now creates and uses a project-local `.venv` when needed, avoiding PEP 668 system-Python installation failures on Debian/Ubuntu/Armbian.
+- Reduced root `requirements.txt` to headless server dependencies.
+- Moved desktop input, screen, camera, and local-control dependencies to `desktop-companion/requirements.txt`.
+- Moved Playwright to the optional `requirements-browser.txt` server extra and stopped automatic browser-binary installation.
+- Removed desktop/audio post-install instructions from the server installer.
+- No existing source file was removed.
