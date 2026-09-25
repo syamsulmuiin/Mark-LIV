@@ -84,7 +84,9 @@ class App:
             # restarting PortAudio streams each turn caused the desktop companion
             # to become silent after the first response on some devices/backends.
             if state=='SPEAKING': self.speaking=True
-            elif state in ('LISTENING','ACTIVE'): self.speaking=False
+            elif state in ('LISTENING','ACTIVE','THINKING'): self.speaking=False
+            label = 'Listening' if state=='ACTIVE' else state.title()
+            self.root.after(0, lambda value=label: self.status.set(value))
         elif typ=='log': self.note(f"{m.get('speaker','JARVIS')}: {m.get('text','')}")
         elif typ=='capability.call': self.capability(m)
     def on_data(self,_w,data,opcode,_fin):

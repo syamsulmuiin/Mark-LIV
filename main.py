@@ -362,6 +362,28 @@ def _exception_text(exc: BaseException) -> str:
     return "\n".join(part for part in parts if part)
 
 
+def _is_transient_transport_error(exc: BaseException) -> bool:
+    """Classify temporary network/WebSocket failures that should reconnect quietly.
+
+    Gemini Live can wrap the original socket error in APIError 1006 and then in
+    a TaskGroup ExceptionGroup. Inspect the complete nested text so Windows
+    transport failures do not become misleading application tracebacks.
+    """
+    text = _exception_text(exc).lower()
+    markers = (
+        "1006", "abnormal closure", "no close frame received or sent",
+        "timeouterror", "timed out", "getaddrinfo", "cancellederror",
+        "connectionrefusederror", "connectionabortederror",
+        "connectionreseterror", "connectionerror", "oserror",
+        "cannot connect", "network is unreachable",
+        "remote computer refused", "network connection was aborted",
+        "winerror 64", "network name is no longer available",
+        "winerror 121", "semaphore timeout period has expired",
+        "winerror 1225", "winerror 1236",
+    )
+    return any(marker in text for marker in markers)
+
+
 def _keep_context_of(exc: BaseException) -> bool:
     """Read `keep_context` off a reconnect signal, unwrapping the group the
     TaskGroup put it in. Defaults to True: an unexpected shape must not silently
@@ -732,6 +754,21 @@ class JarvisLive:
                 loop.create_task(self._dashboard.broadcast({
                     "type": "status",
                     "state": "speaking" if value else "listening",
+                }))
+            except RuntimeError:
+                pass
+
+    def set_thinking(self):
+        """Publish a real model-processing state before response audio starts."""
+        if self._is_speaking:
+            return
+        self.ui.set_state("THINKING")
+        if self._dashboard:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._dashboard.broadcast({
+                    "type": "status",
+                    "state": "thinking",
                 }))
             except RuntimeError:
                 pass
@@ -1394,6 +1431,17 @@ class JarvisLive:
                     if response.server_content:
                         sc = response.server_content
 
+                        # THINKING is event-driven, not timer-driven: publish it only
+                        # when Gemini has started producing server-side turn content
+                        # but response audio has not started yet.
+                        if not response.data and not self._is_speaking:
+                            _has_model_content = bool(
+                                (sc.output_transcription and sc.output_transcription.text)
+                                or getattr(sc, "model_turn", None)
+                            )
+                            if _has_model_content:
+                                self.set_thinking()
+
                         if sc.output_transcription and sc.output_transcription.text:
                             txt = _clean_transcript(sc.output_transcription.text)
                             # A turn that involves a tool call passes through
@@ -1472,6 +1520,9 @@ class JarvisLive:
                                 asyncio.create_task(_cam_close())
 
                     if response.tool_call:
+                        # Tool execution is also genuine processing time before the
+                        # spoken answer, so expose it as THINKING on companions.
+                        self.set_thinking()
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
                             print(f"[JARVIS] 📞 {fc.name}")
@@ -1496,6 +1547,7 @@ class JarvisLive:
                 ))
                 or "keepalive ping timeout" in _recv_err
                 or "timed out while closing connection" in _recv_err
+                or _is_transient_transport_error(e)
             )
             if not _expected_rollover:
                 print(f"[JARVIS] ❌ Recv: {e}")
@@ -1935,14 +1987,7 @@ class JarvisLive:
                 # Transient network loss is an availability state, not a code
                 # failure.  Keep retry/backoff active without flooding error.log
                 # with a full traceback on every reconnect attempt.
-                _network_markers = (
-                    "timeouterror", "timed out", "getaddrinfo", "cancellederror",
-                    "connectionrefusederror", "connectionabortederror",
-                    "connectionreseterror", "connectionerror", "oserror",
-                    "cannot connect", "network is unreachable",
-                    "remote computer refused", "network connection was aborted",
-                )
-                _is_transient_network = any(k in _err_lower for k in _network_markers)
+                _is_transient_network = _is_transient_transport_error(e)
                 if not _is_transient_network:
                     print(f"[JARVIS] Error ({type(e).__name__}): {e}")
                     traceback.print_exc()

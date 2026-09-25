@@ -1,3 +1,10 @@
+# v39 — Android CI maintenance and headless server cleanup
+
+- Updated `actions/checkout` in the Android workflow from v4 to v5. Other workflow actions remain on their currently compatible major versions pending verified upstream major releases.
+- Removed obsolete server-local audio modules: `core/audio_devices.py`, `core/stt.py`, and `core/tts.py`.
+- Preserved the corresponding desktop companion runtime modules under `desktop-companion/runtime/core/`.
+- No runtime routing, voice relay, companion state, scheduling, or server administration behavior was changed.
+
 # MARK-LIV current patch notes
 
 This file replaces the obsolete notes for the former GUI/CLI/background architecture.
@@ -109,3 +116,26 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 - Moved Playwright to the optional `requirements-browser.txt` server extra and stopped automatic browser-binary installation.
 - Removed desktop/audio post-install instructions from the server installer.
 - No existing source file was removed.
+
+## v37 — Quiet recovery for abnormal WebSocket closure
+
+- Treats Gemini Live WebSocket `1006 abnormal closure` as a transient transport failure when the underlying connection disappears without a close frame.
+- Recognizes Windows network failures `WinError 64` and `WinError 121` as transient transport conditions.
+- Suppresses duplicate receive-side and TaskGroup tracebacks for these expected connectivity failures while preserving reconnect/backoff and local conversation-context recovery.
+- Unexpected application errors still retain full tracebacks.
+- No companion routing, audio lifecycle, scheduling, tool behavior, or server administration behavior was changed.
+
+
+## v38 - Companion Thinking State
+- Added an event-driven `THINKING` voice state for Android and desktop companions.
+- Voice state flow is `LISTENING -> THINKING -> SPEAKING -> LISTENING`.
+- `THINKING` is emitted only when Gemini produces pre-audio model content or while a tool call is being executed; no cosmetic delay timer was added.
+- Existing microphone streams remain alive across state changes.
+- Preserved the v37 transient network recovery behavior.
+
+## v40 - Verified Android GitHub Actions majors
+
+- Verified the latest upstream releases before changing the workflow: actions/checkout v7.0.1, actions/setup-java v6.0.1, gradle/actions v6.3.0, and actions/upload-artifact v7.0.1.
+- Updated `build-android.yml` to the corresponding maintained major tags: `checkout@v7`, `setup-java@v6`, `setup-gradle@v6`, and `upload-artifact@v7`.
+- Android application source, Java 17, Android SDK 35, Gradle 8.10.2, signing, and artifact paths are unchanged.
+- Python Quality CI remains intentionally on hold.
