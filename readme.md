@@ -162,3 +162,11 @@ Long-running server output is bounded. `runtime/error.log` rotates by size (5 Mi
 
 ### Optional dashboard dependencies
 The core runtime can start when dashboard import or initialization dependencies are unavailable; the dashboard is disabled and the reason is logged. A dashboard port ownership conflict remains fatal because it indicates a duplicate server worker and protects the single-instance server lifecycle.
+
+### v32 network configuration centralization
+Network endpoints and ports now use `core/network_config.py` as the server source of truth. Defaults remain unchanged, but deployments can override them with `MARK_LIV_PUBLIC_HOSTNAME`, `MARK_LIV_DASHBOARD_PORT`, `MARK_LIV_LAN_HTTPS_PORT`, `MARK_LIV_DISCOVERY_PORT`, and `MARK_LIV_LOCAL_HOST`, or `config/network.json`. The standalone desktop runtime carries the same config module. Android uses `BuildConfig.MARK_LIV_PUBLIC_URL`, set at APK build time from `MARK_LIV_PUBLIC_URL`, so the public endpoint is no longer duplicated in Kotlin.
+
+
+### Default network configuration (v33)
+
+`config/network.json` is now included in the package and is the normal place to edit MARK-LIV network deployment values. The shipped file preserves the existing deployment: `auth.kasirdigital.web.id`, dashboard `8000`, LAN HTTPS `8001`, discovery `37991`, and local host `127.0.0.1`. Environment variables remain optional overrides for special deployments; users who keep the existing deployment do not need to create any environment variables. The standalone desktop companion includes the same default file at `desktop-companion/runtime/config/network.json`. Resolution order remains: environment override → JSON config → built-in safety default.

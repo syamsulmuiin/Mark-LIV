@@ -6,12 +6,13 @@ permissions and revocation remain enforced by core.device_mesh.
 from __future__ import annotations
 import json, os, platform, shutil, subprocess, threading, urllib.request, tarfile
 from pathlib import Path
+from runtime.core.network_config import PUBLIC_HOSTNAME, LOCAL_BASE_URL
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 BIN_DIR = BASE_DIR / "runtime" / "cloudflared"
 STATE_FILE = BASE_DIR / "config" / "remote_access.json"
-DEFAULT_HOSTNAME = "auth.kasirdigital.web.id"
-DEFAULT_LOCAL_URL = "http://127.0.0.1:8000"
+DEFAULT_HOSTNAME = PUBLIC_HOSTNAME
+DEFAULT_LOCAL_URL = LOCAL_BASE_URL
 TOKEN_ENV = "JARVIS_CLOUDFLARE_TUNNEL_TOKEN"
 
 

@@ -67,3 +67,15 @@ At minimum, compile changed Python modules with `python -m py_compile` and run Z
 - Missing optional dashboard dependencies now disable the dashboard and allow the core runtime to continue.
 - Dashboard port ownership conflicts remain fatal intentionally, preserving the single-server-worker protection.
 - No companion protocol, voice routing, Gemini lifecycle, scheduling, or tool behavior was changed.
+
+### v32 network configuration centralization
+Network endpoints and ports now use `core/network_config.py` as the server source of truth. Defaults remain unchanged, but deployments can override them with `MARK_LIV_PUBLIC_HOSTNAME`, `MARK_LIV_DASHBOARD_PORT`, `MARK_LIV_LAN_HTTPS_PORT`, `MARK_LIV_DISCOVERY_PORT`, and `MARK_LIV_LOCAL_HOST`, or `config/network.json`. The standalone desktop runtime carries the same config module. Android uses `BuildConfig.MARK_LIV_PUBLIC_URL`, set at APK build time from `MARK_LIV_PUBLIC_URL`, so the public endpoint is no longer duplicated in Kotlin.
+
+## v33 — explicit default network config
+
+- Added `config/network.json` to the package as the normal editable network configuration.
+- Preserved the existing deployment values: `auth.kasirdigital.web.id`, ports `8000`, `8001`, `37991`, and local host `127.0.0.1`.
+- Added the same default JSON to the standalone desktop companion runtime.
+- Environment variables are still supported only as optional highest-priority overrides.
+- Resolution order: environment override → JSON config → built-in safety default.
+- No runtime routing, pairing, voice, dashboard, or reconnect behavior was changed.

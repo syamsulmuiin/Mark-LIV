@@ -9,6 +9,7 @@ import os
 import sys
 import subprocess as _subprocess
 from pathlib import Path
+from core.network_config import LOCAL_BASE_URL, DASHBOARD_PORT
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MAIN_FILE = BASE_DIR / "main.py"
@@ -64,7 +65,7 @@ def _local_server_identity(timeout=1.0):
     """
     try:
         import urllib.request as _ur, json as _json
-        req = _ur.Request("http://127.0.0.1:8000/api/local/health", headers={"X-Jarvis-Local": "1"})
+        req = _ur.Request(f"{LOCAL_BASE_URL}/api/local/health", headers={"X-Jarvis-Local": "1"})
         with _ur.urlopen(req, timeout=timeout) as r:
             data = _json.loads(r.read().decode("utf-8"))
         if data.get("service") == "MARK-LIV" and data.get("status") == "ready":
@@ -100,9 +101,9 @@ def _spawn_server():
     if (pid := _server_pid()):
         print(f"MARK LIV server already running (PID {pid}).")
         return pid
-    # Do not overwrite lifecycle state if port 8000 belongs to another process.
+    # Do not overwrite lifecycle state if the configured dashboard port belongs to another process.
     if _local_server_ready():
-        print("MARK LIV cannot start: port 8000 is already in use. Stop the existing service first.")
+        print(f"MARK LIV cannot start: port {DASHBOARD_PORT} is already in use. Stop the existing service first.")
         return None
     pidfile.unlink(missing_ok=True)
     # The worker owns runtime/error.log through a rotating text stream.
@@ -150,7 +151,7 @@ def _pair_device():
         return
     try:
         import urllib.request as _ur, json as _json
-        req = _ur.Request("http://127.0.0.1:8000/api/local/pairing/new", method="POST", headers={"X-Jarvis-Local": "1"})
+        req = _ur.Request(f"{LOCAL_BASE_URL}/api/local/pairing/new", method="POST", headers={"X-Jarvis-Local": "1"})
         with _ur.urlopen(req, timeout=3) as r:
             data = _json.loads(r.read().decode("utf-8"))
         print(f"MARK LIV Pair Code: {data['code']}")

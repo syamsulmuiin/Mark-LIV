@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 import requests, websocket, sounddevice as sd
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from cryptography.hazmat.primitives import serialization
+from runtime.core.network_config import PUBLIC_BASE_URL, DISCOVERY_PORT
 
 APP_DIR=Path.home()/".mark-liv-companion"; APP_DIR.mkdir(exist_ok=True)
 STATE=APP_DIR/"state.json"
@@ -47,7 +48,7 @@ class App:
         try:
             deadline=time.time()+timeout
             while time.time()<deadline:
-                sock.sendto(msg,('255.255.255.255',37991))
+                sock.sendto(msg,('255.255.255.255',DISCOVERY_PORT))
                 try:
                     data,_=sock.recvfrom(4096); r=json.loads(data.decode())
                     if r.get('magic')=='MARKLIV_DISCOVER_V1' and r.get('code')==code:return r['server'].rstrip('/')
@@ -56,7 +57,7 @@ class App:
         finally:sock.close()
     def pair(self):
         try:
-            code=self.code.get().strip().upper(); base='https://auth.kasirdigital.web.id'; o=requests.get(f'{base}/api/pairing/offer/{code}',timeout=8,verify=False).json(); nonce=o['nonce']
+            code=self.code.get().strip().upper(); base=PUBLIC_BASE_URL; o=requests.get(f'{base}/api/pairing/offer/{code}',timeout=8,verify=False).json(); nonce=o['nonce']
             peer={'device_id':self.st['device_id'],'name':self.st['name'],'public_key':self.st['public_key']}; sig=b64(priv(self.st).sign(f'{nonce}:{code}'.encode()))
             caps=['jarvis.command','notifications.receive','open_url','app.launch','app.close','desktop.command','legacy.action']
             r=requests.post(f'{base}/api/pairing/accept',json={'code':code,'peer':peer,'signature':sig,'capabilities':caps},timeout=8,verify=False); r.raise_for_status()

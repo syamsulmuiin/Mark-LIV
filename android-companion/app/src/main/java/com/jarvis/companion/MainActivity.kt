@@ -46,7 +46,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var micRunning = false
     private val prefs by lazy { getSharedPreferences("jarvis-device", MODE_PRIVATE) }
     private val client by lazy { lanClient() }
-    private val serverBase: String get() = prefs.getString("server", "https://auth.kasirdigital.web.id") ?: "https://auth.kasirdigital.web.id"
+    private val serverBase: String get() = prefs.getString("server", BuildConfig.MARK_LIV_PUBLIC_URL) ?: BuildConfig.MARK_LIV_PUBLIC_URL
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -93,7 +93,7 @@ class MainActivity : AppCompatActivity() {
         val code=rawCode.trim().uppercase()
         if(code.length != 6){ pairStatus.text=getString(R.string.pair_code_help); return }
         pairStatus.text=getString(R.string.pairing)
-        pairAgainstServer(code, "https://auth.kasirdigital.web.id")
+        pairAgainstServer(code, BuildConfig.MARK_LIV_PUBLIC_URL)
     }
 
     private fun pairAgainstServer(code:String, base:String) {

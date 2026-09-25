@@ -2,6 +2,7 @@
 from __future__ import annotations
 import getpass, json, os, platform
 from pathlib import Path
+from core.network_config import LOCAL_BASE_URL
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / "config" / "api_keys.json"
@@ -43,7 +44,7 @@ def interactive_setup(force: bool=False) -> bool:
             from core.cloudflare_tunnel import install, configure_named_tunnel, DEFAULT_HOSTNAME
             install()
             print(f"Permanent endpoint: https://{DEFAULT_HOSTNAME}")
-            print("Create a remotely-managed Cloudflare Tunnel and map that hostname to http://localhost:8000.")
+            print(f"Create a remotely-managed Cloudflare Tunnel and map that hostname to {LOCAL_BASE_URL}.")
             token=getpass.getpass("Cloudflare Tunnel token: ").strip()
             if not token: raise ValueError("Tunnel token was empty")
             configure_named_tunnel(token, DEFAULT_HOSTNAME, True)

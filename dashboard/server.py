@@ -1,7 +1,7 @@
 """
 dashboard/server.py — JARVIS Local HTTP Dashboard
 
-Plain HTTP on port 8000 (no SSL warnings, no firewall issues).
+Plain HTTP on configured HTTP port (no SSL warnings, no firewall issues).
 Security at the application layer: AES-256-CBC with session-key-derived key.
 CryptoJS is auto-downloaded once and served locally — no CDN needed after that.
 
@@ -40,9 +40,9 @@ except Exception:
 BASE_DIR    = Path(__file__).resolve().parent.parent
 from core.device_mesh import DeviceMesh
 from core.cloudflare_tunnel import NamedTunnel, enabled as cloudflare_enabled, public_url as cloudflare_public_url
+from core.network_config import DASHBOARD_PORT, LAN_HTTPS_PORT, DISCOVERY_PORT
 STATIC_DIR  = Path(__file__).parent / "static"
-PORT        = 8000
-DISCOVERY_PORT = 37991
+PORT        = DASHBOARD_PORT
 DISCOVERY_MAGIC = "MARKLIV_DISCOVER_V1"
 MAX_UPLOAD_MB = 500
 
@@ -515,8 +515,8 @@ class DashboardServer:
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
-        # Port 8000 is intentionally plain HTTP. Cloudflare terminates public
-        # TLS and forwards to http://127.0.0.1:8000. Keeping the origin HTTP
+        # The configured dashboard port is intentionally plain HTTP. Cloudflare terminates public
+        # TLS and forwards to http://the configured local HTTP endpoint. Keeping the origin HTTP
         # avoids a protocol mismatch/502 when the tunnel Public Hostname is
         # configured with service HTTP, as intended by setup.
         return f"http://{self._ip}:{PORT}"
@@ -540,7 +540,7 @@ class DashboardServer:
     def get_manual_url(self) -> str:
         """URL for manual browser entry. When HTTPS active, points to alias port (also HTTPS)."""
         if self._ssl_enabled():
-            return f"{self._ip}:{PORT + 1}"
+            return f"{self._ip}:{LAN_HTTPS_PORT}"
         return f"{self._ip}:{PORT}"
 
     def _aes_key(self, session_key: str) -> bytes:
@@ -1096,15 +1096,15 @@ class DashboardServer:
     async def _serve_alias(self) -> None:
         """Second HTTPS server on PORT+1 sharing the same app and in-memory state.
         Chrome HTTPS-upgrades any bare IP:PORT the user types, so this port also needs TLS.
-        User types IP:8001 → Chrome tries https → self-signed cert warning → accept once → done."""
+        User types IP:<LAN_HTTPS_PORT> → Chrome tries https → self-signed cert warning → accept once → done."""
         ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
         ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT + 1)
+        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, LAN_HTTPS_PORT)
         cfg = uvicorn.Config(
-            self.app, host="0.0.0.0", port=PORT + 1, log_level="warning",
+            self.app, host="0.0.0.0", port=LAN_HTTPS_PORT, log_level="warning",
             ssl_keyfile=str(ssl_key), ssl_certfile=str(ssl_cert),
         )
-        print(f"[Dashboard] Manual entry:  {self._ip}:{PORT + 1}  (type in browser, accept cert once)")
+        print(f"[Dashboard] Manual entry:  {self._ip}:{LAN_HTTPS_PORT}  (type in browser, accept cert once)")
         await uvicorn.Server(cfg).serve()
 
     def _serve_pairing_discovery(self) -> None:
@@ -1170,10 +1170,10 @@ class DashboardServer:
         # no waiting for UAC dialogs or subprocess timeouts.
         asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
 
-        # Cloudflare Public Hostname is configured as HTTP -> 127.0.0.1:8000.
-        # Therefore port 8000 MUST stay HTTP. Public traffic is still HTTPS
+        # Cloudflare Public Hostname is configured as HTTP -> the configured local HTTP endpoint.
+        # Therefore configured HTTP port MUST stay HTTP. Public traffic is still HTTPS
         # because TLS terminates at Cloudflare. Keep the self-signed HTTPS LAN
-        # alias on 8001 for clients that explicitly want local TLS.
+        # alias on the configured LAN HTTPS port for clients that explicitly want local TLS.
         _ensure_certs()
         if self._ssl_enabled():
             asyncio.create_task(self._serve_alias())
