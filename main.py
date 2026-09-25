@@ -45,6 +45,8 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+from core.language_compat import has_explicit_diagnostic_intent, is_generic_error_report
+
 import numpy as np
 from google import genai
 from google.genai import types
@@ -1023,12 +1025,8 @@ class JarvisLive:
                 # diagnostic/repair intent in the user's actual latest utterance and
                 # enough symptom detail to diagnose something concrete.
                 _last_user = next((x[5:].strip() for x in reversed(self._session_log) if x.startswith("User:")), "")
-                _intent = bool(re.search(
-                    r"\b(diagnos(?:a|e|is|tic)?|debug|periksa|cek|check|inspect|telusuri|analisis|analis[ai]s|repair|fix|perbaiki)\b",
-                    _last_user, re.IGNORECASE))
-                _generic = bool(re.fullmatch(
-                    r"\s*(ada|terdapat|there(?:'s| is))?\s*(potential\s+)?(error|bug|masalah|problem)(\s+(nih|ini|lagi))?[.!?]*\s*",
-                    _last_user, re.IGNORECASE))
+                _intent = has_explicit_diagnostic_intent(_last_user)
+                _generic = is_generic_error_report(_last_user)
                 _problem = str(args.get("problem", "")).strip()
                 _invented_generic = _problem.casefold() in {
                     "user noticed potential error and wants diagnosis",

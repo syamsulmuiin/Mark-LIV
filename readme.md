@@ -2,6 +2,11 @@
 
 MARK-LIV is a headless JARVIS server with native companion clients for Android, Windows, Linux, and macOS. The server owns the Gemini Live session, trusted-device mesh, scheduling, memory, and server-side services; interaction and device-local execution happen through installed companions.
 
+### Project language policy
+
+Project-facing source comments, documentation, prompts, logs, UI text, and examples are maintained in English. Natural-language compatibility aliases may contain non-English input literals where required to preserve multilingual command recognition; those aliases are isolated in `core/language_compat.py` and are not user-facing project prose.
+
+
 ## Current architecture (v24 documentation refresh)
 
 ```text
@@ -73,9 +78,9 @@ Interactive voice belongs to the companion. The server brokers the Gemini Live s
 
 Examples:
 
-- Voice from Android: “Buka WhatsApp” → Android companion.
-- Voice from Windows: “Buka Chrome” → Windows companion.
-- “Buka Chrome di laptop Linux” → explicitly targeted paired Linux companion.
+- Voice from Android: “Open WhatsApp” → Android companion.
+- Voice from Windows: “Open Chrome” → Windows companion.
+- “Open Chrome on the Linux laptop” → explicitly targeted paired Linux companion.
 - A server administration request may execute on the server when that target is explicit and an appropriate server action exists.
 
 `call_current_device` means the companion that originated the current turn. `call_paired_device` is for an explicitly selected other paired device. Name-to-device resolution prefers the currently online matching record.
@@ -104,7 +109,7 @@ A request such as “Setiap pagi jam 7 sapa aku lalu bacakan berita terbaru” c
 
 `actions/self_repair_diagnostic.py` provides **read-only** self-repair diagnosis. It may inspect as many relevant project files as required by the dependency/root-cause path. There is no arbitrary total file-count limit; discovery proceeds in context-sized rounds until the relevant closure is reached.
 
-Diagnostic activation is **conversational first**. A vague statement such as “ada error” does not start self-repair automatically. JARVIS first acknowledges the issue and asks for the concrete symptom (or uses evidence the user already supplied), then runs the diagnostic only when the user explicitly asks to diagnose/check/debug/repair that concrete problem. Before starting, JARVIS states that the diagnostic is read-only. A server-side activation guard rejects accidental generic tool calls as a second safety layer.
+Diagnostic activation is **conversational first**. A vague statement such as “there is an error” does not start self-repair automatically. JARVIS first acknowledges the issue and asks for the concrete symptom (or uses evidence the user already supplied), then runs the diagnostic only when the user explicitly asks to diagnose/check/debug/repair that concrete problem. Before starting, JARVIS states that the diagnostic is read-only. A server-side activation guard rejects accidental generic tool calls as a second safety layer.
 
 Diagnostic mode can report a root cause, files inspected, files that would need changes, proposed changes, validation plan, risk, and missing evidence. It deliberately has **no apply capability**. It cannot use this mode to edit/delete production source, install dependencies, restart the server, or commit/push changes. Saying “terapkan” does not bypass that restriction.
 

@@ -79,3 +79,8 @@ Server deployment endpoints and ports are edited in `config/network.json`. The d
 ## Headless server boundary
 
 The server does not enumerate or open microphone/speaker devices and does not depend on a desktop GUI toolkit. Companion clients own local audio capture, playback, and user-interface presentation. The server may process PCM data received from companions, but that does not require local audio hardware.
+
+
+## Language compatibility boundary
+
+Project-facing documentation, comments, prompts, logs, UI text, and examples are English-only. Multilingual input aliases required for natural-language compatibility are isolated from orchestration code in `core/language_compat.py`. This keeps the project text consistent without removing the ability to understand supported non-English commands.

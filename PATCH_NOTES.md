@@ -90,3 +90,12 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 - The server continues to process and relay companion PCM audio without opening local audio hardware.
 - No server GUI dependency is imported or installed on the server startup path.
 - No files were removed.
+
+
+## v35 — English-only project text audit
+
+- Replaced remaining Indonesian examples in `readme.md` with English examples.
+- Rewrote self-repair examples in `core/prompt.txt` in English.
+- Moved non-English diagnostic input aliases out of `main.py` into `core/language_compat.py`.
+- Non-English literals in `core/language_compat.py` are intentional compatibility data only; they preserve natural-language command recognition and are not project-facing documentation, comments, logs, prompts, or UI text.
+- Runtime behavior, routing, voice, companion execution, and self-repair safety semantics are unchanged.
