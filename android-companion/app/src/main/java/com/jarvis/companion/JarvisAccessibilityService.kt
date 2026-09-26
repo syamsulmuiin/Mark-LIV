@@ -88,6 +88,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         if (targetText.isNotBlank()) candidates += root.findAccessibilityNodeInfosByText(targetText)
         if (candidates.isEmpty()) collectEditable(root, candidates)
         val node = candidates.firstOrNull { it.isEditable } ?: error("Editable field not found")
+        if (isCredentialField(node)) error("AUTHENTICATION_REQUIRED: credential input is blocked; waiting for user instruction")
         val b = Bundle(); b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b)) error("Android rejected text input")
         return "text entered"
@@ -115,7 +116,8 @@ class JarvisAccessibilityService : AccessibilityService() {
             if (text.isNotBlank() || desc.isNotBlank() || id.isNotBlank() || n.isClickable || n.isEditable) {
                 arr.put(JSONObject().put("text", text).put("description", desc).put("view_id", id)
                     .put("class", n.className?.toString().orEmpty()).put("clickable", n.isClickable)
-                    .put("editable", n.isEditable).put("scrollable", n.isScrollable).put("depth", depth).apply {
+                    .put("editable", n.isEditable).put("credential", isCredentialField(n))
+                    .put("scrollable", n.isScrollable).put("depth", depth).apply {
                         val b = Rect(); n.getBoundsInScreen(b)
                         put("bounds", JSONObject().put("left", b.left).put("top", b.top).put("right", b.right).put("bottom", b.bottom))
                     })
@@ -125,6 +127,18 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
         walk(root, 0)
         return JSONObject().put("package", root.packageName?.toString().orEmpty()).put("nodes", arr)
+    }
+
+
+    private fun isCredentialField(n: AccessibilityNodeInfo): Boolean {
+        if (n.isPassword) return true
+        val hints = listOf(
+            n.text?.toString().orEmpty(),
+            n.contentDescription?.toString().orEmpty(),
+            n.viewIdResourceName.orEmpty(),
+            n.hintText?.toString().orEmpty()
+        ).joinToString(" ").lowercase()
+        return Regex("(^|[^a-z])(password|passwd|passcode|pin|credential|kata\\s*sandi|sandi)([^a-z]|$)").containsMatchIn(hints)
     }
 
     private fun tap(x: Float, y: Float): Boolean {

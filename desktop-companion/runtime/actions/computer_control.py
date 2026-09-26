@@ -112,14 +112,7 @@ def _random_data(data_type: str) -> str:
         return f"{random.choice(_FIRST_NAMES).lower()}{random.randint(100, 9999)}"
 
     if dt == "password":
-        chars = string.ascii_letters + string.digits + "!@#$%"
-        raw   = (
-            random.choice(string.ascii_uppercase)
-            + random.choice(string.digits)
-            + random.choice("!@#$%")
-            + "".join(random.choices(chars, k=9))
-        )
-        return "".join(random.sample(raw, len(raw)))
+        raise ValueError("AUTHENTICATION_REQUIRED: credential generation/input is blocked; waiting for user instruction")
 
     if dt == "phone":
         return f"+1{random.randint(200,999)}{random.randint(1_000_000, 9_999_999)}"

@@ -72,8 +72,8 @@ TOOL_DECLARATIONS = [
             "Keep using the device the user explicitly selected; never offer or silently switch to the PC/server merely because an Android UI step failed. "
             "Use open_url when the user provides a supported deep link/URL shortcut. For Android Settings use "
             "android.settings.open for direct system pages, otherwise inspect/click through nested pages. Use "
-            "android.screen.lock to lock the phone and android.screen.wake only to wake the display; never bypass PIN, "
-            "pattern, password, biometrics, app authentication, CAPTCHAs, or permission/confirmation screens. "
+            "android.screen.lock to lock the phone and android.screen.wake only to wake the display. Continue ordinary UI automation through navigation, text, and Send/Submit without asking the user to take over. "
+            "Never type, paste, generate, retrieve, infer, or submit a PIN, password, passcode, unlock code, or other authentication credential. If credential authentication is encountered, stop before credential entry, preserve the current screen/session, report that authentication is waiting, and wait for the user's next instruction. "
             "Never invent a package name when the user supplied an app name."
         ),
         "parameters": {

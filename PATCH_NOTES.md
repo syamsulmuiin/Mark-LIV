@@ -156,3 +156,12 @@ Network endpoints and ports now use `core/network_config.py` as the server sourc
 - Updated `build-android.yml` to the corresponding maintained major tags: `checkout@v7`, `setup-java@v6`, `setup-gradle@v6`, and `upload-artifact@v7`.
 - Android application source, Java 17, Android SDK 35, Gradle 8.10.2, signing, and artifact paths are unchanged.
 - Python Quality CI remains intentionally on hold.
+
+## v43 - Full companion control with credential boundary
+
+- Companion-origin requests now explicitly continue autonomous device UI execution for ordinary user-authorized actions, including navigation, text entry, selection, Send/Submit, and verification.
+- Android Accessibility inspection marks credential fields and Android text entry hard-blocks password/PIN/passcode/credential fields before input.
+- Desktop companion local execution blocks operations that explicitly target credential fields or credential data types.
+- Password generation through computer control is blocked on both server and desktop runtime copies.
+- When authentication is encountered, automation preserves the current session/state and waits for user instruction instead of navigating away or handing ordinary UI work back to the user.
+- No credential is typed, pasted, generated, inferred, or submitted by MARK-LIV.

@@ -21,10 +21,30 @@ TOOLS = {
     "system_monitor": ("actions.system_monitor", "system_monitor"),
 }
 
+CREDENTIAL_TERMS = ("password", "passwd", "passcode", "pin", "credential", "unlock_code", "unlock code")
+
+def _credential_target(parameters: dict) -> bool:
+    def walk(value, key=""):
+        key_text = str(key).lower().replace("-", "_")
+        if any(term.replace(" ", "_") in key_text for term in CREDENTIAL_TERMS):
+            return True
+        if isinstance(value, dict):
+            return any(walk(v, k) for k, v in value.items())
+        if isinstance(value, (list, tuple)):
+            return any(walk(v, key) for v in value)
+        if key_text in {"target", "target_text", "field", "field_name", "label", "data_type"}:
+            text = str(value).lower()
+            return any(term in text for term in CREDENTIAL_TERMS)
+        return False
+    return walk(parameters)
+
 def invoke(tool: str, parameters: dict | None = None):
     if tool not in TOOLS:
         raise ValueError(f"unsupported local tool: {tool}")
+    parameters = parameters or {}
+    if _credential_target(parameters):
+        return "AUTHENTICATION_REQUIRED: credential input is blocked; waiting for user instruction"
     module_name, handler_name = TOOLS[tool]
     module = importlib.import_module(module_name)
     handler = getattr(module, handler_name)
-    return handler(parameters=parameters or {}, response=None, player=None, session_memory=None)
+    return handler(parameters=parameters, response=None, player=None, session_memory=None)
