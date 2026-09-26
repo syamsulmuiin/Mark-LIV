@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var startConversation: Button
     private lateinit var phoneControl: ImageButton
     private var ws: WebSocket? = null
+    @Volatile private var intentionalVoiceEnd = false
     private var recorder: AudioRecord? = null
     private var player: AudioTrack? = null
     @Volatile private var micRunning = false
@@ -122,6 +123,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun connect(){
+        intentionalVoiceEnd = false
         val server=prefs.getString("server",null)?:return; val id=identity().first
         val wsBase=server.replaceFirst("https://","wss://").replaceFirst("http://","ws://")
         ws=client.newWebSocket(Request.Builder().url("$wsBase/ws/device?device_id=$id").build(),object:WebSocketListener(){
@@ -141,12 +143,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scheduleReconnect(){
+        if(intentionalVoiceEnd) return
 
         if(!prefs.getBoolean("paired",false)) return
 
         window.decorView.postDelayed({
 
-            if(ws==null && prefs.getBoolean("paired",false)){
+            if(!intentionalVoiceEnd && ws==null && prefs.getBoolean("paired",false)){
 
                 showVoice()
 
@@ -240,7 +243,7 @@ class MainActivity : AppCompatActivity() {
         transcript.text=transcriptTurns.joinToString("\n\n")
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
     }}
-    private fun endVoice(){ stopMic(); releasePlayer(); val current=ws; ws=null; current?.close(1000,"conversation ended"); setEnded() }
+    private fun endVoice(){ intentionalVoiceEnd=true; stopMic(); releasePlayer(); val current=ws; ws=null; current?.close(1000,"conversation ended"); setEnded() }
     private fun setEnded()=runOnUiThread { status.text=getString(R.string.conversation_ended); orb.state="SLEEPING"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }
     private fun pcmLevel(b:ByteArray,n:Int):Float { if(n<2)return 0f; var sum=0.0; var count=0; var i=0; while(i+1<n){ val v=((b[i+1].toInt() shl 8) or (b[i].toInt() and 255)).toShort().toInt(); sum+=v.toDouble()*v;count++;i+=2 }; if(count==0)return 0f; return (sqrt(sum/count)/3500.0).toFloat().coerceIn(0f,1f) }
 

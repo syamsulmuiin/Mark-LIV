@@ -1,3 +1,12 @@
+## v54 - Intentional voice end lifecycle fix
+
+- Fixed ended voice conversations immediately reconnecting after end-call succeeded.
+- Added explicit companion intentional-end state before WebSocket closure.
+- Suppressed automatic reconnect for intentional end while retaining recovery for unexpected transport loss.
+- A new explicit voice connection clears the ended state.
+- Built from v52; v53 installer changes are not included.
+- Synchronized root README, Android companion README, architecture, and patch notes.
+
 ## v52 - Severity-focused error logging
 
 - Fixed `runtime/error.log` capturing the complete server stdout/stderr stream.

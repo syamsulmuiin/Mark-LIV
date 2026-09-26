@@ -47,3 +47,6 @@ Credential fields are a hard boundary: the companion must not accept automated P
 
 Ending a conversation does not stop the MARK-LIV server. Cross-device generic file transfer is not yet advertised as an Android companion capability.
 
+## Voice end and reconnect lifecycle
+
+An intentional end-call action sets explicit local ended state before the voice WebSocket closes. Close/failure callbacks cannot auto-reconnect while that state is active. Unexpected transport loss remains recoverable. Starting a new explicit voice connection clears the state.

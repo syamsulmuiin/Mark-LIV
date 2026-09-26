@@ -149,3 +149,7 @@ The recovery path is transport-generic and does not depend on the application cu
 Warning/error-like stdout diagnostics are retained. Python stderr is written directly to the same rotating sink so exceptions and tracebacks remain complete. The error sink keeps the existing bounded size-based rotation and backup limits.
 
 MARK-LIV does not create a second persistent full-runtime transcript as part of this change. Normal runtime output remains ephemeral unless a dedicated diagnostic facility explicitly captures it.
+
+## Intentional voice termination state
+
+Voice recovery distinguishes intentional session end from unexpected transport failure. End-call first sets explicit intentional-end state, then stops audio and closes the WebSocket. Close/failure callbacks cannot reconnect while that state is active. Unexpected failures still permit automatic reconnect. A new explicit voice connection clears the state.

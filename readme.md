@@ -223,3 +223,7 @@ The dashboard/transport layer is optional where its dependencies are unavailable
 Preserve existing behavior unless a change is explicitly requested. Fix root causes with the smallest compatible patch. Device automation must remain application-agnostic. Do not add per-application UI recipes when the generic companion capability model can perform the task.
 
 Documentation describes the current implementation. Version-by-version history belongs in `PATCH_NOTES.md`, not in this README.
+
+### Intentional voice end
+
+Ending a voice conversation is terminal for that voice session. The companion records the intentional end before closing transport, so WebSocket close/failure callbacks do not trigger automatic reconnect. Unexpected transport loss still uses self-recovery. A new user-initiated voice connection clears the ended state and starts a new session.
