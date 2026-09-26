@@ -1,3 +1,21 @@
+## v45 - Operation-aware companion routing
+
+- Extended origin-device isolation from whole-action routing to operation-aware routing.
+- Preserved the existing device-local guard for browser, computer, settings, desktop, files, apps, screen, messaging, system-monitor, and YouTube actions.
+- Added mixed-action classification for `code_helper`, `game_updater`, and `file_processor`.
+- Device-local operations such as open, launch, type, click, press, focus, close, install, update, patch, show, preview, and print are routed to the origin companion.
+- Backend-only computation remains available on the server and is not blocked merely because the request originated from a companion.
+- Preserved v43 credential-input protection and v44 origin-device isolation.
+- No UI feature was added or removed.
+
+## v44 - Origin companion media isolation
+
+- Fixed a routing omission that allowed `youtube_video` to execute on the headless server even when the request originated from a companion.
+- Added `youtube_video` to the existing origin-first device-local action guard.
+- Companion-originated YouTube/media workflows must continue through `call_current_device` and the origin companion capabilities instead of opening media on the server.
+- Preserved the full companion control and credential-input boundary from v43.
+- No unrelated runtime, UI, Android application, or scheduling behavior was changed.
+
 ## v42 - Clean source package
 
 - Repacked v41 as a clean source distribution.

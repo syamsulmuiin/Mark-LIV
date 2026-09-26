@@ -1246,9 +1246,44 @@ class JarvisLive:
                 _device_local_actions = {
                     "open_app", "computer_control", "computer_settings", "desktop_control",
                     "file_controller", "browser_control", "screen_processor", "send_message",
-                    "system_monitor",
+                    "system_monitor", "youtube_video",
                 }
-                if _origin and name in _device_local_actions and not _explicit_server:
+
+                # Mixed actions can contain both backend-only operations and operations that
+                # manipulate a device/host UI.  Classify the requested operation instead of
+                # blocking the entire action whenever a request originates from a companion.
+                _mixed_device_action_ops = {
+                    "code_helper": {
+                        "open", "open_editor", "launch", "type", "write", "insert",
+                        "click", "press", "hotkey", "focus", "close",
+                    },
+                    "game_updater": {
+                        "open", "launch", "install", "update", "patch", "click",
+                        "type", "press", "close", "restart",
+                    },
+                    "file_processor": {
+                        "open", "open_file", "launch", "show", "preview", "print",
+                        "click", "type", "press",
+                    },
+                }
+
+                def _requested_operation(tool_args):
+                    if not isinstance(tool_args, dict):
+                        return ""
+                    for key in ("action", "operation", "command", "mode"):
+                        value = tool_args.get(key)
+                        if isinstance(value, str) and value.strip():
+                            return value.strip().lower()
+                    return ""
+
+                def _is_companion_device_operation(tool_name, tool_args):
+                    """Return True only when a mixed action requests device-local execution."""
+                    if tool_name in _device_local_actions:
+                        return True
+                    operation = _requested_operation(tool_args)
+                    return operation in _mixed_device_action_ops.get(tool_name, set())
+
+                if _origin and _is_companion_device_operation(name, args) and not _explicit_server:
                     try:
                         _rec = self._dashboard._mesh.get(_origin) or {}
                         _caps = set(_rec.get("capabilities") or [])

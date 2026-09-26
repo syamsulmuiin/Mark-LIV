@@ -90,3 +90,9 @@ Project-facing documentation, comments, prompts, logs, UI text, and examples are
 The root Python environment is the server environment. It must not require a display server, local microphone/speaker stack, camera, screen capture, keyboard/mouse automation, or desktop window APIs. Those dependencies belong to desktop companions. Linux server setup uses a project-local virtual environment when necessary so Debian-family distributions, including Armbian, are not forced to modify an externally managed system Python.
 
 Server-side Playwright automation is an optional extra and is not part of the base headless installation. This keeps ARM deployments independent from browser-binary availability.
+
+
+## Operation-aware origin routing
+
+Companion-originated requests preserve the origin device as the execution target for local UI and device operations. Pure backend computation can still run on the server. Mixed actions are classified by operation so a backend helper does not accidentally open, type, click, launch, or update something on the headless server. Device-local execution must continue through `call_current_device`.
+
