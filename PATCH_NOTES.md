@@ -1,3 +1,12 @@
+## v48 - Conversation end / server shutdown separation
+
+- Fixed the semantic boundary between ending a conversation and shutting down JARVIS.
+- Conversation/session-ending intent must not invoke `shutdown_jarvis`.
+- Server shutdown is reserved for explicit server/service termination intent only.
+- Ending a conversation leaves the server and companions running and ready for the next conversation.
+- The rule is intent-based and language-agnostic; no application-specific or language-specific recipe was added.
+- Preserved v47 generic device automation and the credential boundary.
+
 ## v47 - Application-agnostic device automation
 
 - Companion UI automation is now explicitly capability-driven rather than application-driven.

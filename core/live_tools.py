@@ -177,6 +177,7 @@ TOOL_DECLARATIONS = [
         },
     },
     {
+# EXPLICIT SERVER SHUTDOWN ONLY: never use for ending a conversation/session or farewell intent.
         "name": "shutdown_jarvis",
         "description": (
             "Shuts down the assistant completely. "

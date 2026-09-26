@@ -60,6 +60,7 @@ from memory.memory_manager import (
 # imported or declared here — they self-describe via a TOOL dict in their own
 # actions/*.py file and are auto-discovered by core.action_loader at startup.
 # Only tools that are tied to live-session state stay inline in this file
+# EXPLICIT SERVER SHUTDOWN ONLY: never use for ending a conversation/session or farewell intent.
 # (screen_process, close_camera, save_memory, manage_monitor, shutdown_jarvis,
 # system_status).
 from actions.screen_processor  import _capture_camera, _capture_screen

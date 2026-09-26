@@ -109,3 +109,7 @@ Device automation is capability-driven rather than application-driven. Applicati
 
 The same inspect -> act -> verify loop applies to every application, including applications installed after MARK-LIV was built. Legacy actions may perform backend computation but do not define companion UI behavior. Credential/authentication input remains the intentional user-intervention boundary apart from a genuinely unavailable capability.
 
+## Conversation lifecycle versus server lifecycle
+
+Conversation lifecycle and server lifecycle are separate. Ending or closing a conversation only completes the current conversational session; it does not stop the JARVIS process, server, remote access, or paired companions. Server shutdown is a separate privileged lifecycle action and is selected only from explicit server/service shutdown intent.
+

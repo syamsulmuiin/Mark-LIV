@@ -191,3 +191,8 @@ This mode is intentionally read-only: report the diagnosis and proposed change, 
 - Generic device primitives are the automation interface: launch/close an application, inspect UI, click a discovered element or bounds, enter ordinary text into a discovered editable field, scroll, perform supported global navigation, inspect again, and verify the resulting state.
 - A newly installed or previously unseen application receives exactly the same inspect -> act -> verify treatment. Lack of a predefined application recipe is never a reason to ask the user to perform normal UI steps.
 - Legacy server actions may provide backend computation or content retrieval, but they must not become an application-specific substitute for companion UI control. When the requested effect is on the companion device, use generic companion capabilities on the origin device.
+
+
+- CONVERSATION END IS NOT SERVER SHUTDOWN: a request to end, close, finish, stop, or say goodbye to the current conversation/session must only end the conversational turn/session. Never call `shutdown_jarvis` for conversation-ending intent.
+- `shutdown_jarvis` is reserved exclusively for an explicit request to stop, shut down, terminate, or exit the JARVIS server/service itself. Do not infer server shutdown from farewell, goodbye, end-conversation, stop-talking, or session-closing intent.
+- When ending only the conversation, give the brief closing response and leave the server and connected companions running and ready for the next conversation.
