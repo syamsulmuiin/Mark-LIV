@@ -116,3 +116,28 @@ Conversation lifecycle and server lifecycle are separate. Ending or closing a co
 
 This document describes the current server/companion architecture. The root `readme.md` is the operational entry point and `PATCH_NOTES.md` is the version history. Current invariants are: headless server; companion-only conversational audio; origin-first routing; application-agnostic inspect -> act -> verify device automation; credential input protection; conversation lifecycle separate from server lifecycle; explicit-only scheduling; and no claim of full cross-device file sharing until a common transfer protocol exists across companions.
 
+## Companion voice transport recovery
+
+Interactive voice output is owned by the companion that owns the live interaction. The server relays model PCM to that companion and does not use server-local speaker output.
+
+Android voice playback is a recoverable transport resource rather than a process-lifetime assumption. Before streaming PCM, the companion validates the current `AudioTrack`. If Android reports a dead or invalid playback object, the companion releases the stale player, creates a new initialized streaming player, and retries playback. This prevents a stale platform audio object from requiring an application process restart.
+
+Unexpected companion WebSocket closure or failure performs transport cleanup:
+
+```text
+unexpected transport loss
+        -> stop companion microphone stream
+        -> release stale AudioTrack
+        -> clear the stale WebSocket reference
+        -> schedule companion reconnect
+        -> authenticate/re-establish device transport
+        -> recreate playback state when new audio arrives
+```
+
+Authentication revocation is not auto-recovered as an ordinary transport failure; the companion returns to pairing as required.
+
+Intentional conversation end is separate from unexpected transport recovery. When the user ends the conversation, the companion stops microphone capture, releases playback resources, closes the current conversation socket, and remains in the explicit ended state. It must not immediately reconnect merely because the user intentionally ended that conversation.
+
+Voice routing and command routing remain separate. `call_current_device` targets the origin/current companion. `call_paired_device` is used for another explicitly targeted paired device and requires an exact discovered device identifier; aliases or placeholders for the current device must not be used as paired-device IDs.
+
+The recovery path is transport-generic and does not depend on the application currently open on the companion.

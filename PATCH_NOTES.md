@@ -1,3 +1,10 @@
+## v51 - Voice architecture documentation synchronization
+
+- Synchronized `SERVER_CLIENT_ARCHITECTURE.md` with the v50 companion voice self-recovery implementation.
+- Documented companion audio ownership, stale `AudioTrack` recovery, disconnect cleanup, automatic reconnect, authentication-revocation behavior, and intentional conversation-end behavior.
+- Documented the current-device versus exact paired-device routing boundary.
+- Documentation-only correction; no runtime behavior was changed from v50.
+
 ## v50 - Companion voice self-recovery
 
 - Fixed Android interactive voice playback becoming silent until the companion process was killed and reopened.
