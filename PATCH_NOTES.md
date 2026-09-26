@@ -1,3 +1,12 @@
+## v42 - Clean source package
+
+- Repacked v41 as a clean source distribution.
+- Removed generated Python bytecode and `__pycache__` directories from the distributable package.
+- Validation now checks Python source syntax without writing bytecode into the source tree before packaging.
+- Preserved the v41 signed release workflow fix and the verified GitHub Actions majors.
+- Preserved removal of the obsolete headless-server audio modules while retaining the desktop companion audio modules.
+- No runtime feature, Android application source, server behavior, or companion behavior was changed.
+
 ## v41 - Signed release packaging reliability
 
 - Kept the verified GitHub Actions majors introduced in v40.
