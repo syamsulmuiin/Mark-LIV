@@ -38,3 +38,12 @@ The companion does not silently add root, ADB/Shizuku, Device Owner, arbitrary s
 - **App launch works but UI actions fail:** verify Accessibility is enabled, then retry after UI inspection.
 - **Server says device offline:** confirm the companion is connected; if duplicate historical device names exist, the server should resolve the currently online record/UUID.
 - **Voice has no response audio:** do not change Android audio handling solely to fix command routing. Server command-origin and active-voice state are separate and must both remain valid.
+
+## Current MARK-LIV control model
+
+Android is a companion endpoint for a headless MARK-LIV server. Device UI automation is application-agnostic and uses generic Accessibility capabilities with an inspect -> act -> verify loop. Application/package names are target data, not automation recipes.
+
+Credential fields are a hard boundary: the companion must not accept automated PIN/password/passcode/credential entry. Normal non-credential UI operations remain available when Accessibility and the required Android permission are enabled.
+
+Ending a conversation does not stop the MARK-LIV server. Cross-device generic file transfer is not yet advertised as an Android companion capability.
+

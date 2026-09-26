@@ -1,49 +1,53 @@
 # MARK-LIV / JARVIS
 
-MARK-LIV is a headless JARVIS server with native companion clients for Android, Windows, Linux, and macOS. The server owns the Gemini Live session, trusted-device mesh, scheduling, memory, and server-side services; interaction and device-local execution happen through installed companions.
+MARK-LIV is a headless JARVIS server with native companion clients for Android, Windows, Linux, and macOS. The server owns the AI session, trusted-device mesh, memory, scheduling, remote transport, and server-side services. Interactive voice and device-local UI execution belong to companions.
 
-### Project language policy
+## Project language policy
 
-Project-facing source comments, documentation, prompts, logs, UI text, and examples are maintained in English. Natural-language compatibility aliases may contain non-English input literals where required to preserve multilingual command recognition; those aliases are isolated in `core/language_compat.py` and are not user-facing project prose.
+Project-facing source comments, documentation, prompts, logs, UI text, and examples are maintained in English. Natural-language compatibility aliases may contain non-English input literals only where required for multilingual command recognition; those aliases belong in `core/language_compat.py`.
 
-
-## Current architecture (v24 documentation refresh)
+## Architecture
 
 ```text
-                    MARK-LIV SERVER (headless)
-                             |
-             +---------------+---------------+
-             |               |               |
-          Android         Windows        Linux/macOS
-          Companion       Companion       Companion
-             |               |               |
-       Android actions   local actions    local actions
-       + interactive     + interactive    + interactive
-          voice             voice             voice
+                         MARK-LIV SERVER
+                            (headless)
+                                |
+             +------------------+------------------+
+             |                  |                  |
+          Android          Desktop A          Desktop B
+         Companion          Companion           Companion
+             |                  |                  |
+       local device UI     local device UI    local device UI
+       companion voice     companion voice    companion voice
 ```
 
-The server does **not** provide a local microphone, speaker, desktop GUI, or interactive conversation CLI. Supported administrative commands are `--start`, `--stop`, `--enable`, `--disable`, and `--pair`. `--server-worker` is internal.
+The server has no local conversational GUI, microphone, speaker, or interactive CLI. Supported administrative commands are:
 
-Device-local requests are **origin-first**: a request received from a companion executes on that originating companion unless the user explicitly targets another paired device or the server. `origin_device_id` controls command routing; `active_voice_device` independently controls the interactive audio destination. Server audio output is not used.
+```text
+--start
+--stop
+--enable
+--disable
+--pair
+```
 
-## Install the server
+`--server-worker` is internal.
 
-Requirements: Python 3.11+ (tested through 3.13) and a configured Gemini API key.
+A request received from a companion is origin-first. Device-local effects execute on the originating companion unless the user explicitly targets another paired device or the server. `origin_device_id` controls command routing; `active_voice_device` independently controls interactive audio delivery. The server does not play conversational audio.
+
+## Server installation
+
+Requirements: Python 3.11+ and a configured Gemini API key.
 
 ```bash
 python setup.py
-```
-
-`setup.py` installs Python requirements, Playwright Chromium/Firefox when available, and runs first-time JARVIS configuration. Existing configuration is preserved.
-
-Then:
-
-```bash
 python main.py --start
 python main.py --pair
 ```
 
-Enter the Pair Code in a companion. Pairing is designed to work through the configured public endpoint (`https://auth.kasirdigital.web.id`) as well as supported local transport. A Pair Code is short-lived and does not replace device identity: paired devices use Ed25519 challenge/response and capability permissions.
+`setup.py` installs the headless server requirements and runs first-time configuration. Existing configuration is preserved. On Linux, including Armbian, setup uses a project-local virtual environment when required to avoid modifying an externally managed system Python.
+
+The root server installation intentionally excludes desktop GUI, local audio, camera, screen capture, keyboard/mouse automation, and desktop-window dependencies. Desktop-only dependencies live under `desktop-companion/`.
 
 ### Administrative commands
 
@@ -52,14 +56,30 @@ Enter the Pair Code in a companion. Pairing is designed to work through the conf
 | `python main.py --start` | Start the detached headless server worker |
 | `python main.py --stop` | Stop the tracked server worker |
 | `python main.py --enable` | Enable per-user autostart and start the server |
-| `python main.py --disable` | Remove autostart; does not silently stop a running server |
-| `python main.py --pair` | Create a Pair Code on an already-running server |
+| `python main.py --disable` | Remove autostart without silently stopping a running server |
+| `python main.py --pair` | Create a short-lived Pair Code on a running server |
+
+## Pairing and remote access
+
+Pairing supports the configured public endpoint as well as supported local transport. The default deployment configuration is stored in `config/network.json`; environment variables are optional overrides.
+
+A Pair Code is short-lived and does not replace device identity. Paired devices use their device identity and advertised/permitted capabilities after pairing.
+
+Network configuration resolution is:
+
+```text
+environment override -> config/network.json -> built-in safety default
+```
+
+The standalone desktop runtime carries its corresponding network configuration. Android receives its public URL through build configuration.
 
 ## Companion clients
 
 ### Android
 
-Source: `android-companion/`. Build with Android Studio/JDK 17. Android provides app launching, URL/clipboard/notification functions, interactive voice, and user-approved Accessibility UI automation (`android.ui.inspect`, `click`, `text`, `scroll`, and global actions). Accessibility must be enabled by the user in Android Settings. No root, ADB/Shizuku, Device Owner, or arbitrary shell access is silently added.
+Source: `android-companion/`.
+
+Android provides companion voice, application launch/close, supported device functions, and user-approved Accessibility UI automation. Accessibility must be enabled by the user in Android Settings. MARK-LIV does not silently require root, ADB/Shizuku, Device Owner, or arbitrary shell access.
 
 ### Windows / Linux / macOS
 
@@ -70,123 +90,134 @@ python desktop-companion/install.py
 python desktop-companion/companion.py
 ```
 
-The desktop companion carries a local runtime so established device-side actions execute on the companion computer instead of turning the headless server into a desktop-control endpoint.
+The desktop companion carries its own local runtime so device-side work executes on that companion rather than turning the headless server into a desktop-control endpoint.
 
-## Voice and command routing
+## Application-agnostic device automation
 
-Interactive voice belongs to the companion. The server brokers the Gemini Live session but never plays TTS locally. The companion that originates a voice interaction is the normal response-audio target.
+Companion UI automation is capability-driven, not application-driven. Application names, package names, contacts, symbols, media titles, document names, websites, and other domain values are target data only. They do not select a special automation policy.
 
-Examples:
-
-- Voice from Android: “Open WhatsApp” → Android companion.
-- Voice from Windows: “Open Chrome” → Windows companion.
-- “Open Chrome on the Linux laptop” → explicitly targeted paired Linux companion.
-- A server administration request may execute on the server when that target is explicit and an appropriate server action exists.
-
-`call_current_device` means the companion that originated the current turn. `call_paired_device` is for an explicitly selected other paired device. Name-to-device resolution prefers the currently online matching record.
-
-## Android UI automation
-
-Android UI work should use a state-aware loop rather than blind coordinates or blind scrolling:
+The generic execution model is:
 
 ```text
-inspect -> choose action -> act -> inspect/verify -> recover if needed
+inspect -> choose next generic action -> act -> inspect -> verify
+                                      ^                     |
+                                      +------ recover ------+
 ```
 
-For example, finding a WhatsApp contact should inspect the active UI, use Search when available, enter the contact name, inspect the result, open the correct chat, find the message field, enter text, send, and verify. A failed click should trigger inspection/recovery rather than an unsupported conclusion that the phone has no Internet or Accessibility is disabled.
+Generic companion primitives include application launch/close, UI inspection, click/tap, ordinary text entry, scrolling, supported global navigation, and verification.
 
-## User-created scheduled workflows
+The same mechanism applies to applications installed after MARK-LIV was built. A missing predefined application recipe is not a reason to hand normal UI work back to the user. When a requested target is not visible, JARVIS should inspect and use available navigation/search/scroll/text/select operations, then inspect again.
 
-MARK-LIV has no built-in morning news/briefing schedule. News, time, and briefings are on-demand unless the user explicitly creates a schedule. User-created recurring workflows are persisted in:
+Legacy server actions may still provide backend computation or content retrieval, but they must not become an application-specific substitute for companion UI control.
+
+## Credential boundary
+
+Normal user-authorized UI operations should be completed autonomously when the companion exposes the required capability. The intentional boundary is authentication input.
+
+JARVIS must not type, paste, generate, retrieve, infer, or submit a PIN, password, passcode, unlock code, or other authentication credential. When authentication is required, it stops before credential entry/submission and preserves the current application/session state. After the user completes authentication and asks to continue, JARVIS inspects the current state and resumes the unfinished task.
+
+Ordinary non-credential text entry, search, navigation, selection, and normal send/submit actions are not credential operations.
+
+## Voice
+
+Interactive voice belongs to companions. The server brokers the AI session but does not capture local server microphone audio or play conversational TTS locally.
+
+`call_current_device` addresses the companion that originated the current turn. `call_paired_device` addresses an explicitly selected paired device. Name-to-device resolution should prefer the currently online matching record.
+
+## Conversation lifecycle and server lifecycle
+
+Ending a conversation is not server shutdown.
+
+```text
+end conversation/session
+        -> close the conversational interaction
+        -> server remains running
+        -> companions remain available
+
+explicit server/service shutdown
+        -> shutdown_jarvis
+        -> server termination
+```
+
+`shutdown_jarvis` is reserved for explicit server/service termination intent. Farewell, stop-talking, or end-session intent must not shut down the MARK-LIV server.
+
+## Scheduling
+
+MARK-LIV does not create unsolicited morning news, time, greeting, or briefing schedules. Scheduled workflows run only when explicitly requested by the user.
+
+User-created recurring workflows are persisted in:
 
 ```text
 ~/.jarvis/scheduled_workflows.json
 ```
 
-A request such as “Setiap pagi jam 7 sapa aku lalu bacakan berita terbaru” creates a user-authorized recurring workflow. At execution time JARVIS runs the instruction then, allowing time-sensitive content to be fetched fresh. `last_run_date` prevents duplicate daily execution.
+At execution time the saved instruction is run then, allowing time-sensitive information to be obtained fresh. Duplicate daily execution is prevented by persisted run state.
 
-## Diagnostic / Dry-Run Self Repair
+## Read-only self-repair diagnostic
 
-`actions/self_repair_diagnostic.py` provides **read-only** self-repair diagnosis. It may inspect as many relevant project files as required by the dependency/root-cause path. There is no arbitrary total file-count limit; discovery proceeds in context-sized rounds until the relevant closure is reached.
+`actions/self_repair_diagnostic.py` provides read-only diagnosis. It can inspect the relevant dependency/root-cause path and report findings, files involved, proposed changes, validation steps, risks, and missing evidence.
 
-Diagnostic activation is **conversational first**. A vague statement such as “there is an error” does not start self-repair automatically. JARVIS first acknowledges the issue and asks for the concrete symptom (or uses evidence the user already supplied), then runs the diagnostic only when the user explicitly asks to diagnose/check/debug/repair that concrete problem. Before starting, JARVIS states that the diagnostic is read-only. A server-side activation guard rejects accidental generic tool calls as a second safety layer.
+Diagnostic mode has no apply capability. It must not edit/delete production source, install dependencies, restart the server, or commit/push changes. A vague error statement alone does not authorize repair; explicit concrete diagnostic intent is required.
 
-Diagnostic mode can report a root cause, files inspected, files that would need changes, proposed changes, validation plan, risk, and missing evidence. It deliberately has **no apply capability**. It cannot use this mode to edit/delete production source, install dependencies, restart the server, or commit/push changes. Saying “terapkan” does not bypass that restriction.
+Protected architecture invariants include headless server operation, origin-first device routing, separation of command and voice routing, companion-only conversational audio, remote pairing, application-agnostic companion UI automation, credential protection, and no unsolicited scheduled content.
 
-Protected architecture invariants include: headless server operation; origin-first device routing; separation of `origin_device_id` and `active_voice_device`; companion-only voice output; preservation of Android/Windows/Linux/macOS capability paths; remote pairing support; and no unsolicited background news/time/briefing jobs.
+## File handling status
+
+The server currently contains upload/download endpoints and a server upload repository. This is not yet a complete generic cross-device file-transfer protocol. Do not describe MARK-LIV as supporting arbitrary companion-to-companion file sharing until common transfer capabilities are implemented across the companions.
+
+Server uploads use the first writable location available from the server upload configuration, including the JARVIS uploads folder under the user Downloads/Documents area or the project upload fallback.
+
+## Network configuration
+
+The normal deployment configuration is `config/network.json`. Supported environment overrides include the public hostname, dashboard/transport ports, discovery port, and local host settings.
+
+Playwright/browser binaries are not installed automatically on the headless server. If server-side browser automation is intentionally required, install `requirements-browser.txt` separately on a supported platform.
 
 ## Security model
 
-Pairing establishes device identity, not blanket authority. Device calls are restricted to advertised/permitted capabilities. Secrets, credentials, private device identity, signing material, and runtime state must remain outside version control. Android Accessibility is explicit user consent and fails closed when disabled.
+Pairing establishes device identity, not blanket authority. Device calls are restricted to advertised/permitted capabilities. Secrets, credentials, private device identity, signing material, and runtime state must remain outside version control. Android Accessibility requires explicit user consent and fails closed when unavailable.
 
 For Android release signing, see `android-companion/SIGNING.md`.
 
+## Runtime behavior
+
+Expected Live-session rollover and temporary transport/network loss use the reconnect/resumption path rather than being treated as a new user conversation. Unexpected application failures retain diagnostic logging.
+
+Long-running server output is bounded by rotating `runtime/error.log`. Runtime model identifiers are centralized in `core/model_config.py`; network settings are centralized in `core/network_config.py`.
+
+The dashboard/transport layer is optional where its dependencies are unavailable, except that a dashboard port ownership conflict remains fatal because it indicates a duplicate server worker.
+
 ## Project map
 
-- `main.py` — headless server lifecycle, Gemini Live orchestration, routing, scheduling.
-- `core/` — Gemini/session, device mesh, setup/configuration, interfaces, memory helpers and shared infrastructure.
-- `actions/` — server/tool actions, including scheduled workflows and read-only self-repair diagnostics.
-- `dashboard/` — server HTTP/WebSocket transport and pairing/device endpoints; not a replacement for native companions.
+- `main.py` — headless server orchestration and routing.
+- `core/server_lifecycle.py` — server start/stop/enable/disable/pair lifecycle.
+- `core/live_tools.py` — Live-session tool declarations.
+- `core/model_config.py` — provider model identifiers.
+- `core/network_config.py` — server network configuration.
+- `core/language_compat.py` — isolated multilingual command aliases.
+- `actions/` — server/tool actions, schedules, and read-only diagnostic tools.
+- `dashboard/` — HTTP/WebSocket transport, pairing/device endpoints, and server upload endpoints.
 - `android-companion/` — Android native companion.
-- `desktop-companion/` — Windows/Linux/macOS native companion and local runtime.
+- `desktop-companion/` — Windows/Linux/macOS companion and local runtime.
 - `memory/` — memory/config management.
 - `plugins/` — plugin extension points.
 
 ## Troubleshooting
 
-**`--start` says already running:** use `python main.py --stop` before intentionally replacing/restarting the worker. Server lifecycle is tracked by the worker PID; HTTP health is auxiliary verification rather than the sole lifecycle source of truth.
+**Server already running:** stop the tracked worker before intentionally replacing/restarting it.
 
-**`--pair` says the server is not running:** start it first with `python main.py --start`.
+**Pairing says the server is not running:** start the server first.
 
-**Android app opens but UI control fails:** confirm JARVIS Companion Accessibility is enabled, then inspect the current Android UI before retrying an action.
+**A companion application opens but UI control fails:** confirm the required companion accessibility/control permission is enabled, inspect the current UI/state, and retry through the generic inspect -> act -> verify path.
 
-**A device appears offline despite another record with the same name being online:** use the current paired-device list/UUID. Routing prefers the online matching device; stale historical records should not be treated as the active target.
+**A device appears offline while another record with the same name is online:** use the current paired-device list/device identity. Routing should prefer the online matching device.
 
-**Voice input works but no JARVIS audio returns:** command routing and voice routing are separate. The origin companion should remain the command target while `active_voice_device` remains the audio target; do not merge those states.
+**Voice input works but response audio does not return:** command routing and voice routing are separate; verify the active voice companion without changing the origin command target.
 
-## Development rule
+**Ending a conversation stops the server:** this is incorrect behavior. Conversation lifecycle must remain separate from explicit server shutdown.
 
-Preserve existing behavior unless a change is explicitly requested. Fix root causes with the smallest compatible patch. Device-specific fixes should not be copied to other companion platforms unless their implementation actually requires the same change.
+## Development rules
 
+Preserve existing behavior unless a change is explicitly requested. Fix root causes with the smallest compatible patch. Device automation must remain application-agnostic. Do not add per-application UI recipes when the generic companion capability model can perform the task.
 
-### v27 runtime stability
-- Headless server does not emit unsolicited CPU/RAM voice alerts; system status remains available on demand.
-- Gemini side/diagnostic calls no longer open extra Live sessions that can consume Live quota or destabilize the interactive companion voice session.
-- Removed retired pinned `gemini-2.5-flash` / `gemini-2.5-flash-lite` fallback names in favor of maintained rolling aliases.
-- WebSocket keepalive/close timeouts are treated as transport rollover: conversation context is preserved and the server reconnects quietly. Expected Live rollover conditions are logged concisely without the duplicate receive-task traceback; unexpected exceptions retain full tracebacks for diagnosis.
-- Diagnostic self-repair remains read-only and still requires explicit, concrete user diagnostic intent.
-
-### Runtime log behavior (v29)
-Expected Live-session rollover and temporary network loss are recovered through the normal reconnect path without traceback spam. Unexpected application errors still retain full tracebacks for diagnosis.
-
-### Runtime maintainability
-
-The headless entry point is intentionally thin: server start/stop/enable/disable/pair lifecycle code lives in `core/server_lifecycle.py`, Live-only tool declarations live in `core/live_tools.py`, and provider model identifiers live in `core/model_config.py`. Change the default Gemini model there once, or override it with `MARK_LIV_LIVE_MODEL` / `MARK_LIV_TEXT_MODEL` / `MARK_LIV_TEXT_FALLBACK_MODEL`.
-
-Long-running server output is bounded. `runtime/error.log` rotates by size (5 MiB, five backups by default) through `core/runtime_log.py`. Deployments can change the limits with `MARK_LIV_LOG_MAX_BYTES` and `MARK_LIV_LOG_BACKUPS`.
-
-### Optional dashboard dependencies
-The core runtime can start when dashboard import or initialization dependencies are unavailable; the dashboard is disabled and the reason is logged. A dashboard port ownership conflict remains fatal because it indicates a duplicate server worker and protects the single-instance server lifecycle.
-
-### v32 network configuration centralization
-Network endpoints and ports now use `core/network_config.py` as the server source of truth. Defaults remain unchanged, but deployments can override them with `MARK_LIV_PUBLIC_HOSTNAME`, `MARK_LIV_DASHBOARD_PORT`, `MARK_LIV_LAN_HTTPS_PORT`, `MARK_LIV_DISCOVERY_PORT`, and `MARK_LIV_LOCAL_HOST`, or `config/network.json`. The standalone desktop runtime carries the same config module. Android uses `BuildConfig.MARK_LIV_PUBLIC_URL`, set at APK build time from `MARK_LIV_PUBLIC_URL`, so the public endpoint is no longer duplicated in Kotlin.
-
-
-### Default network configuration (v33)
-
-`config/network.json` is now included in the package and is the normal place to edit MARK-LIV network deployment values. The shipped file preserves the existing deployment: `auth.kasirdigital.web.id`, dashboard `8000`, LAN HTTPS `8001`, discovery `37991`, and local host `127.0.0.1`. Environment variables remain optional overrides for special deployments; users who keep the existing deployment do not need to create any environment variables. The standalone desktop companion includes the same default file at `desktop-companion/runtime/config/network.json`. Resolution order remains: environment override → JSON config → built-in safety default.
-
-
-## Headless server dependencies
-
-The root MARK LIV installation is a headless server runtime. It does not require a local microphone, speaker, audio host API, display server, PyQt6, or `sounddevice`. Audio capture/playback and desktop presentation belong to companion clients.
-
-Install the server with `python setup.py`. Desktop companion dependencies remain isolated under `desktop-companion/`.
-
-### Linux and Armbian server installation
-
-The root installer is a headless-server installer. It does not install desktop GUI, local audio, camera, screen-capture, keyboard/mouse-control, or desktop-window packages. On Linux, including Armbian, `setup.py` creates and uses a project-local `.venv` when the current interpreter is not already inside a virtual environment. This avoids modifying an externally managed system Python (PEP 668).
-
-Common `x86_64` and `aarch64/arm64` Linux systems are detected explicitly. Playwright and its browser binaries are no longer installed automatically on the server. If server-side browser automation is intentionally required, install `requirements-browser.txt` separately on a platform supported by Playwright.
-
-Desktop-only dependencies remain under `desktop-companion/requirements.txt` and must not be installed on a headless server merely to start MARK LIV.
+Documentation describes the current implementation. Version-by-version history belongs in `PATCH_NOTES.md`, not in this README.

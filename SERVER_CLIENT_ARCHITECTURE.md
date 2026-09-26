@@ -71,8 +71,7 @@ Diagnostic self-repair is user-initiated and conversational first: a vague error
 Network endpoints and ports now use `core/network_config.py` as the server source of truth. Defaults remain unchanged, but deployments can override them with `MARK_LIV_PUBLIC_HOSTNAME`, `MARK_LIV_DASHBOARD_PORT`, `MARK_LIV_LAN_HTTPS_PORT`, `MARK_LIV_DISCOVERY_PORT`, and `MARK_LIV_LOCAL_HOST`, or `config/network.json`. The standalone desktop runtime carries the same config module. Android uses `BuildConfig.MARK_LIV_PUBLIC_URL`, set at APK build time from `MARK_LIV_PUBLIC_URL`, so the public endpoint is no longer duplicated in Kotlin.
 
 
-## Network configuration (v33)
-
+## Default network configuration
 Server deployment endpoints and ports are edited in `config/network.json`. The desktop companion standalone runtime mirrors the same defaults in `desktop-companion/runtime/config/network.json`. Environment variables are optional deployment overrides; if absent, the JSON values are used, with built-in constants retained only as final safety defaults.
 
 
@@ -112,4 +111,8 @@ The same inspect -> act -> verify loop applies to every application, including a
 ## Conversation lifecycle versus server lifecycle
 
 Conversation lifecycle and server lifecycle are separate. Ending or closing a conversation only completes the current conversational session; it does not stop the JARVIS process, server, remote access, or paired companions. Server shutdown is a separate privileged lifecycle action and is selected only from explicit server/service shutdown intent.
+
+## Documentation synchronization status
+
+This document describes the current server/companion architecture. The root `readme.md` is the operational entry point and `PATCH_NOTES.md` is the version history. Current invariants are: headless server; companion-only conversational audio; origin-first routing; application-agnostic inspect -> act -> verify device automation; credential input protection; conversation lifecycle separate from server lifecycle; explicit-only scheduling; and no claim of full cross-device file sharing until a common transfer protocol exists across companions.
 

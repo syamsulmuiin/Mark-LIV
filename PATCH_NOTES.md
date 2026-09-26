@@ -1,3 +1,12 @@
+## v49 - Documentation synchronization
+
+- Rebuilt the root README as current-state documentation instead of accumulated version-specific notes.
+- Synchronized the README with the headless server architecture, origin-first routing, application-agnostic device automation, credential boundary, companion-only voice, explicit-only scheduling, and conversation/server lifecycle separation.
+- Documented the actual current file-handling status without claiming unsupported generic cross-device file sharing.
+- Synchronized server/client architecture documentation and companion README status notes.
+- Kept version history in `PATCH_NOTES.md`.
+- No runtime/source behavior was changed in this documentation-only release.
+
 ## v48 - Conversation end / server shutdown separation
 
 - Fixed the semantic boundary between ending a conversation and shutting down JARVIS.
