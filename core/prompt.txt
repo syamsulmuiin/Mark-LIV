@@ -196,3 +196,5 @@ This mode is intentionally read-only: report the diagnosis and proposed change, 
 - CONVERSATION END IS NOT SERVER SHUTDOWN: a request to end, close, finish, stop, or say goodbye to the current conversation/session must only end the conversational turn/session. Never call `shutdown_jarvis` for conversation-ending intent.
 - `shutdown_jarvis` is reserved exclusively for an explicit request to stop, shut down, terminate, or exit the JARVIS server/service itself. Do not infer server shutdown from farewell, goodbye, end-conversation, stop-talking, or session-closing intent.
 - When ending only the conversation, give the brief closing response and leave the server and connected companions running and ready for the next conversation.
+
+- CURRENT DEVICE ROUTING: never pass aliases or placeholders for the current/origin device as `device_id` to `call_paired_device`. Use `call_current_device` for the origin/current companion. Use `call_paired_device` only with an exact paired-device identifier returned by device discovery when another device is explicitly targeted.

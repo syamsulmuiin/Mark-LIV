@@ -1,3 +1,12 @@
+## v50 - Companion voice self-recovery
+
+- Fixed Android interactive voice playback becoming silent until the companion process was killed and reopened.
+- AudioTrack is validated before playback, recreated after dead/invalid write states, and fully released on transport disconnect/failure.
+- Non-revoked companion WebSocket failures/closures schedule automatic reconnection instead of requiring an application restart.
+- Intentional conversation end remains a user-controlled end state and does not itself request a reconnect.
+- Added generic current-device routing guidance: current/origin companion calls use `call_current_device`; `call_paired_device` requires an exact discovered device ID.
+- No application-specific automation rule was added.
+
 ## v49 - Documentation synchronization
 
 - Rebuilt the root README as current-state documentation instead of accumulated version-specific notes.

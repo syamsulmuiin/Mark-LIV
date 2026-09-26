@@ -135,10 +135,29 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch(_:Exception){ ui("Invalid message from JARVIS") } }
             override fun onMessage(w:WebSocket,bytes:ByteString){ setVoiceState("SPEAKING"); playAudio(bytes.toByteArray()) }
-            override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else setEnded() }
-            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE } }
+            override fun onClosing(w:WebSocket,code:Int,reason:String){ stopMic(); releasePlayer(); ws=null; if(code==4001||code==4003){ prefs.edit().putBoolean("paired",false).apply(); showPair("Pairing revoked. Enter a new Pair Code.") } else { setEnded(); scheduleReconnect() } }
+            override fun onFailure(w:WebSocket,t:Throwable,r:Response?){ stopMic(); releasePlayer(); ws=null; runOnUiThread { status.text="Disconnected: ${t.message}"; orb.state="DISCONNECTED"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }; scheduleReconnect() }
         })
     }
+
+    private fun scheduleReconnect(){
+
+        if(!prefs.getBoolean("paired",false)) return
+
+        window.decorView.postDelayed({
+
+            if(ws==null && prefs.getBoolean("paired",false)){
+
+                showVoice()
+
+                connect()
+
+            }
+
+        },1500)
+
+    }
+
 
     private fun startMic(){
         if(ActivityCompat.checkSelfPermission(this,Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){ ActivityCompat.requestPermissions(this,arrayOf(Manifest.permission.RECORD_AUDIO),42); return }
@@ -152,13 +171,64 @@ class MainActivity : AppCompatActivity() {
         }.apply { name="JarvisPhoneMic"; isDaemon=true; start() }
     }
     private fun stopMic(){ micRunning=false; try{recorder?.stop()}catch(_:Exception){}; recorder?.release(); recorder=null }
-    private fun playAudio(pcm:ByteArray){
-        orb.audioLevel(pcmLevel(pcm,pcm.size))
-        try {
-            if(player==null){ val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096); player=AudioTrack(AudioManager.STREAM_MUSIC,24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2,AudioTrack.MODE_STREAM); player?.play() }
-            player?.write(pcm,0,pcm.size)
-        } catch(_:Exception){}
+    private val audioLock=Any()
+
+    private fun releasePlayer(){
+        synchronized(audioLock){
+            val p=player
+            player=null
+            if(p!=null){
+                try{ p.pause() }catch(_:Exception){}
+                try{ p.flush() }catch(_:Exception){}
+                try{ p.stop() }catch(_:Exception){}
+                try{ p.release() }catch(_:Exception){}
+            }
+        }
     }
+
+    private fun ensurePlayer():AudioTrack?{
+        synchronized(audioLock){
+            val current=player
+            if(current!=null && current.state==AudioTrack.STATE_INITIALIZED){
+                try{
+                    if(current.playState!=AudioTrack.PLAYSTATE_PLAYING) current.play()
+                    return current
+                }catch(_:Exception){
+                    try{ current.release() }catch(_:Exception){}
+                    player=null
+                }
+            }else if(current!=null){
+                try{ current.release() }catch(_:Exception){}
+                player=null
+            }
+            return try{
+                val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(4096)
+                val created=AudioTrack(AudioManager.STREAM_MUSIC,24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT,min*4,AudioTrack.MODE_STREAM)
+                if(created.state!=AudioTrack.STATE_INITIALIZED){
+                    try{ created.release() }catch(_:Exception){}
+                    null
+                }else{
+                    created.play()
+                    player=created
+                    created
+                }
+            }catch(_:Exception){ null }
+        }
+    }
+
+    private fun playAudio(pcm:ByteArray){
+        if(pcm.isEmpty()) return
+        orb.audioLevel(pcmLevel(pcm,pcm.size))
+        var p=ensurePlayer() ?: return
+        var written=try{ p.write(pcm,0,pcm.size,AudioTrack.WRITE_BLOCKING) }catch(_:Exception){ AudioTrack.ERROR_DEAD_OBJECT }
+        if(written==AudioTrack.ERROR_DEAD_OBJECT || written==AudioTrack.ERROR_INVALID_OPERATION || written==AudioTrack.ERROR_BAD_VALUE){
+            releasePlayer()
+            p=ensurePlayer() ?: return
+            written=try{ p.write(pcm,0,pcm.size,AudioTrack.WRITE_BLOCKING) }catch(_:Exception){ -1 }
+        }
+        if(written<0) releasePlayer()
+    }
+
     override fun onRequestPermissionsResult(requestCode:Int,permissions:Array<out String>,grantResults:IntArray){ super.onRequestPermissionsResult(requestCode,permissions,grantResults); if(requestCode==42){ if(grantResults.firstOrNull()==PackageManager.PERMISSION_GRANTED) startMic() else ui("Microphone permission is required for Live Voice") } }
 
     private fun setVoiceState(s:String)=runOnUiThread { status.text=s.lowercase().replaceFirstChar { it.uppercase() }; orb.state=s }
@@ -170,7 +240,7 @@ class MainActivity : AppCompatActivity() {
         transcript.text=transcriptTurns.joinToString("\n\n")
         transcriptScroll.post { transcriptScroll.fullScroll(View.FOCUS_DOWN) }
     }}
-    private fun endVoice(){ stopMic(); try{player?.pause();player?.flush()}catch(_:Exception){}; ws?.close(1000,"conversation ended"); ws=null; setEnded() }
+    private fun endVoice(){ stopMic(); releasePlayer(); val current=ws; ws=null; current?.close(1000,"conversation ended"); setEnded() }
     private fun setEnded()=runOnUiThread { status.text=getString(R.string.conversation_ended); orb.state="SLEEPING"; endConversation.visibility=View.GONE; startConversation.visibility=View.VISIBLE }
     private fun pcmLevel(b:ByteArray,n:Int):Float { if(n<2)return 0f; var sum=0.0; var count=0; var i=0; while(i+1<n){ val v=((b[i+1].toInt() shl 8) or (b[i].toInt() and 255)).toShort().toInt(); sum+=v.toDouble()*v;count++;i+=2 }; if(count==0)return 0f; return (sqrt(sum/count)/3500.0).toFloat().coerceIn(0f,1f) }
 

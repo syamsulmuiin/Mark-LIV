@@ -124,6 +124,8 @@ Interactive voice belongs to companions. The server brokers the AI session but d
 
 `call_current_device` addresses the companion that originated the current turn. `call_paired_device` addresses an explicitly selected paired device. Name-to-device resolution should prefer the currently online matching record.
 
+The Android companion validates and recreates its streaming audio player when the platform reports a dead or invalid playback object. Unexpected companion transport loss releases stale playback state and schedules reconnection, so normal voice recovery does not require killing and reopening the application.
+
 ## Conversation lifecycle and server lifecycle
 
 Ending a conversation is not server shutdown.
