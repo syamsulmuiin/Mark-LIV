@@ -1,3 +1,11 @@
+## v41 - Signed release packaging reliability
+
+- Kept the verified GitHub Actions majors introduced in v40.
+- The Android debug job is unchanged because it already succeeds with the new Actions versions.
+- The signed release job now uses Gradle cache in read-only mode to avoid writing or reusing release packaging state across runs.
+- The signed release build now runs `clean assembleRelease --stacktrace` so stale incremental packaging output is removed and any future packaging failure exposes the full underlying exception.
+- No Android application source, Gradle version, SDK level, signing secret names, or runtime behavior was changed.
+
 # v39 — Android CI maintenance and headless server cleanup
 
 - Updated `actions/checkout` in the Android workflow from v4 to v5. Other workflow actions remain on their currently compatible major versions pending verified upstream major releases.
