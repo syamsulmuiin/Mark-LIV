@@ -1,4 +1,4 @@
-"""Bounded stdout/stderr logging for the long-running headless server."""
+"""Severity-filtered rotating error logging for the headless server."""
 from __future__ import annotations
 
 import io
@@ -10,14 +10,16 @@ from pathlib import Path
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_BACKUPS = 5
 
+_WARNING_MARKERS = (
+    "warning", "warn:", "[warn", "⚠", "failed", "failure", "error",
+    "exception", "traceback", "critical", "fatal", "unavailable",
+    "out of quota", "denied", "rejected",
+)
+
 
 class RotatingTextStream(io.TextIOBase):
-    """Small print/traceback-compatible rotating text stream.
+    """Bounded rotating text sink used by the severity filters."""
 
-    Rotation is size based: error.log -> error.log.1 -> ... .N.  It intentionally
-    implements only the TextIO methods used by print() and traceback so the
-    existing console/logging behaviour does not need to be rewritten.
-    """
     def __init__(self, path: Path, max_bytes: int = DEFAULT_MAX_BYTES, backups: int = DEFAULT_BACKUPS):
         self.path = Path(path)
         self.max_bytes = max(64 * 1024, int(max_bytes))
@@ -51,10 +53,10 @@ class RotatingTextStream(io.TextIOBase):
         oldest = self.path.with_name(f"{self.path.name}.{self.backups}")
         oldest.unlink(missing_ok=True)
         for idx in range(self.backups - 1, 0, -1):
-            src = self.path.with_name(f"{self.path.name}.{idx}")
-            dst = self.path.with_name(f"{self.path.name}.{idx + 1}")
-            if src.exists():
-                os.replace(src, dst)
+            source = self.path.with_name(f"{self.path.name}.{idx}")
+            target = self.path.with_name(f"{self.path.name}.{idx + 1}")
+            if source.exists():
+                os.replace(source, target)
         if self.path.exists():
             os.replace(self.path, self.path.with_name(f"{self.path.name}.1"))
         self._file = self.path.open("a", encoding="utf-8", errors="replace", buffering=1)
@@ -75,11 +77,61 @@ class RotatingTextStream(io.TextIOBase):
             self._file.flush()
 
 
+class SeverityFilteredStream(io.TextIOBase):
+    """Persist only warning/error-like stdout lines to the error sink."""
+
+    def __init__(self, sink: RotatingTextStream):
+        self.sink = sink
+        self._pending = ""
+        self._lock = threading.RLock()
+
+    @property
+    def encoding(self):
+        return "utf-8"
+
+    def writable(self):
+        return True
+
+    def isatty(self):
+        return False
+
+    @staticmethod
+    def _should_persist(line: str) -> bool:
+        lowered = line.casefold()
+        return any(marker in lowered for marker in _WARNING_MARKERS)
+
+    def write(self, text):
+        if not text:
+            return 0
+        if not isinstance(text, str):
+            text = str(text)
+        with self._lock:
+            self._pending += text
+            while "\n" in self._pending:
+                line, self._pending = self._pending.split("\n", 1)
+                if self._should_persist(line):
+                    self.sink.write(line + "\n")
+        return len(text)
+
+    def flush(self):
+        with self._lock:
+            if self._pending and self._should_persist(self._pending):
+                self.sink.write(self._pending)
+            self._pending = ""
+            self.sink.flush()
+
+
 def configure_runtime_log(path: Path, max_bytes: int | None = None, backups: int | None = None):
-    """Redirect worker stdout/stderr to one bounded rotating runtime log."""
+    """Keep error.log limited to warnings/errors while preserving tracebacks.
+
+    Normal stdout is intentionally not persisted by the detached server worker.
+    Warning/error-like stdout lines are filtered into the rotating error sink.
+    Stderr is written directly to the same sink so Python tracebacks and explicit
+    stderr diagnostics are retained in full.
+    """
     max_bytes = max_bytes or int(os.getenv("MARK_LIV_LOG_MAX_BYTES", DEFAULT_MAX_BYTES))
     backups = backups or int(os.getenv("MARK_LIV_LOG_BACKUPS", DEFAULT_BACKUPS))
-    stream = RotatingTextStream(path, max_bytes=max_bytes, backups=backups)
-    sys.stdout = stream
-    sys.stderr = stream
-    return stream
+    sink = RotatingTextStream(path, max_bytes=max_bytes, backups=backups)
+    sys.stdout = SeverityFilteredStream(sink)
+    sys.stderr = sink
+    return sink

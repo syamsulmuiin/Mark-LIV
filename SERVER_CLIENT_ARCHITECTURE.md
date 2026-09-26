@@ -141,3 +141,11 @@ Intentional conversation end is separate from unexpected transport recovery. Whe
 Voice routing and command routing remain separate. `call_current_device` targets the origin/current companion. `call_paired_device` is used for another explicitly targeted paired device and requires an exact discovered device identifier; aliases or placeholders for the current device must not be used as paired-device IDs.
 
 The recovery path is transport-generic and does not depend on the application currently open on the companion.
+
+## Runtime error logging boundary
+
+`runtime/error.log` is reserved for actionable diagnostics rather than a complete runtime transcript. The detached headless worker filters normal stdout so routine INFO/debug events, successful device/tool operations, connection-state chatter, and user/assistant transcript lines are not persisted in the error file.
+
+Warning/error-like stdout diagnostics are retained. Python stderr is written directly to the same rotating sink so exceptions and tracebacks remain complete. The error sink keeps the existing bounded size-based rotation and backup limits.
+
+MARK-LIV does not create a second persistent full-runtime transcript as part of this change. Normal runtime output remains ephemeral unless a dedicated diagnostic facility explicitly captures it.

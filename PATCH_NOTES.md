@@ -1,3 +1,12 @@
+## v52 - Severity-focused error logging
+
+- Fixed `runtime/error.log` capturing the complete server stdout/stderr stream.
+- Normal INFO/debug activity, successful tool/device operations, connection chatter, and conversation transcript are no longer persisted in `error.log`.
+- Warning/error-like stdout diagnostics are filtered into `error.log`; stderr remains fully captured so Python exceptions and tracebacks are preserved.
+- Kept bounded size-based rotation and existing log-size/backups configuration.
+- Did not add a persistent full `runtime.log`, avoiding a second stored conversation/runtime transcript.
+- Synchronized `readme.md`, `SERVER_CLIENT_ARCHITECTURE.md`, and `PATCH_NOTES.md`.
+
 ## v51 - Voice architecture documentation synchronization
 
 - Synchronized `SERVER_CLIENT_ARCHITECTURE.md` with the v50 companion voice self-recovery implementation.

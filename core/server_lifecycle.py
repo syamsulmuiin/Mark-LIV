@@ -106,7 +106,7 @@ def _spawn_server():
         print(f"MARK LIV cannot start: port {DASHBOARD_PORT} is already in use. Stop the existing service first.")
         return None
     pidfile.unlink(missing_ok=True)
-    # The worker owns runtime/error.log through a rotating text stream.
+    # The worker owns severity-filtered runtime/error.log through a rotating sink.
     # Keep inherited stdio detached so Windows does not hold the active log open
     # and block atomic rollover/rename.
     kwargs = dict(stdin=_subprocess.DEVNULL, stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, cwd=str(BASE_DIR))
