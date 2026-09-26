@@ -1,3 +1,22 @@
+## v47 - Application-agnostic device automation
+
+- Companion UI automation is now explicitly capability-driven rather than application-driven.
+- Application/package names and domain values are target data only and do not define routing or UI policy.
+- Added generic device-effect operation classification to the central origin-device router.
+- Previously unseen applications use the same inspect -> act -> verify loop without a predefined recipe.
+- Legacy actions remain available for backend work but must not replace generic companion UI control.
+- Preserved credential protection, operation-aware routing, autonomous execution, and headless-server isolation.
+- No application-specific automation recipe was added.
+
+## v46 - Autonomous companion UI execution
+
+- Added a generic inspect -> act -> verify execution contract for all companion applications.
+- JARVIS must no longer ask the user to position a cursor, select normal UI controls, add ordinary items, search ordinary text, or complete other UI steps that the companion can perform.
+- When a target is not visible on the first inspection, JARVIS must navigate, search, scroll, type, select, and re-inspect autonomously before reporting a blocker.
+- Completion must be verified from companion results; JARVIS must not claim success without device evidence.
+- Automation pauses only for the existing credential/authentication boundary or a genuinely missing companion capability.
+- Preserved v45 operation-aware origin routing and all earlier server/headless protections.
+
 ## v45 - Operation-aware companion routing
 
 - Extended origin-device isolation from whole-action routing to operation-aware routing.

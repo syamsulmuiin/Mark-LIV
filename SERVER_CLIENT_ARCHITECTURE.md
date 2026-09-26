@@ -96,3 +96,16 @@ Server-side Playwright automation is an optional extra and is not part of the ba
 
 Companion-originated requests preserve the origin device as the execution target for local UI and device operations. Pure backend computation can still run on the server. Mixed actions are classified by operation so a backend helper does not accidentally open, type, click, launch, or update something on the headless server. Device-local execution must continue through `call_current_device`.
 
+
+## Autonomous companion UI execution
+
+A companion is responsible for completing normal UI workflows on its own device. JARVIS uses an inspect -> act -> verify loop instead of asking the user to position a cursor or manually navigate ordinary application UI. If a target is not visible, JARVIS can inspect, scroll, navigate, search, type ordinary text, select controls, and re-inspect until the requested state is reached.
+
+Automation pauses only at the credential boundary (PIN/password/passcode/authentication) or when the companion genuinely lacks a required capability. After authentication is completed by the user, JARVIS re-inspects the existing session and resumes the unfinished task.
+
+## Application-agnostic device automation
+
+Device automation is capability-driven rather than application-driven. Application/package names and domain values are target data only. The companion exposes generic primitives for launch/close, UI inspection, click/tap, ordinary text entry, scrolling, supported global navigation, and verification.
+
+The same inspect -> act -> verify loop applies to every application, including applications installed after MARK-LIV was built. Legacy actions may perform backend computation but do not define companion UI behavior. Credential/authentication input remains the intentional user-intervention boundary apart from a genuinely unavailable capability.
+

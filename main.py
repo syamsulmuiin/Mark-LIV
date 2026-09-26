@@ -1252,6 +1252,14 @@ class JarvisLive:
                 # Mixed actions can contain both backend-only operations and operations that
                 # manipulate a device/host UI.  Classify the requested operation instead of
                 # blocking the entire action whenever a request originates from a companion.
+                _generic_device_operations = {
+                    "open", "open_app", "open_file", "open_editor", "launch", "close",
+                    "show", "display", "preview", "focus", "select", "choose",
+                    "click", "tap", "press", "hotkey", "type", "write", "insert",
+                    "scroll", "swipe", "back", "home", "search_ui", "navigate_ui",
+                    "install", "update", "patch", "restart", "print",
+                }
+
                 _mixed_device_action_ops = {
                     "code_helper": {
                         "open", "open_editor", "launch", "type", "write", "insert",
@@ -1281,7 +1289,7 @@ class JarvisLive:
                     if tool_name in _device_local_actions:
                         return True
                     operation = _requested_operation(tool_args)
-                    return operation in _mixed_device_action_ops.get(tool_name, set())
+                    return operation in _generic_device_operations or operation in _mixed_device_action_ops.get(tool_name, set())
 
                 if _origin and _is_companion_device_operation(name, args) and not _explicit_server:
                     try:

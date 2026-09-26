@@ -24,7 +24,7 @@ TOOL_DECLARATIONS = [
         "name": "call_current_device",
         "description": (
             "Control the companion device that is currently talking to JARVIS. Use this for requests such as "
-            "open WhatsApp, open Chrome, open Settings, lock this phone, or other actions on this/current device. "
+            "open an application, open device settings, lock this device, or perform other actions on this/current device. "
             "For opening an Android or desktop app use capability app.launch with args.app set to the natural app name. "
             "Do not use server-local open_app for a request originating from a companion when the user means this device."
         ),
@@ -36,7 +36,7 @@ TOOL_DECLARATIONS = [
                     "type": "OBJECT",
                     "description": "Arguments for the selected device capability.",
                     "properties": {
-                        "app": {"type": "STRING", "description": "Natural application name, e.g. WhatsApp or Chrome"},
+                        "app": {"type": "STRING", "description": "Natural application name requested by the user"},
                         "name": {"type": "STRING", "description": "Alternative natural application name"},
                         "package": {"type": "STRING", "description": "Android package only when already known"},
                         "url": {"type": "STRING", "description": "URL for open_url"},
@@ -60,7 +60,7 @@ TOOL_DECLARATIONS = [
         "name": "call_paired_device",
         "description": (
             "Control an online trusted paired device. Use natural app names with app.launch: put the app name "
-            "in args.app (for example Chrome or WhatsApp). Android resolves the installed package; desktop companions resolve the local application. "
+            "in args.app. The companion resolves the installed application using its generic application resolver. "
             "For Android Settings use android.settings.open with optional args.page such as bluetooth, wifi, "
             "apps, accessibility, display, sound, location, security, battery, date/time, or keyboard. "
             "For any installed app, app.launch opens it by natural app name. On desktop companions app.close closes the named local application; on Android it leaves the current app and returns that device to Home because ordinary Android companions cannot force-stop arbitrary apps. Use desktop.command with args.action=lock to lock a desktop companion. On Windows/Linux/macOS companions, use capability legacy.action to run the established local MARK LIV tools without losing pre-refactor functionality. Pass args.tool as one of open_app, computer_control, computer_settings, desktop_control, file_controller, browser_control, screen_processor, send_message, or system_monitor, and put the original tool arguments in args.parameters. Use this for mouse/keyboard/window/settings/file/browser/screen/message/system operations on the target desktop. To reach a main menu, submenu, conversation, "
@@ -85,7 +85,7 @@ TOOL_DECLARATIONS = [
                     "type": "OBJECT",
                     "description": "Arguments for the selected device capability.",
                     "properties": {
-                        "app": {"type": "STRING", "description": "Natural application name, e.g. WhatsApp or Chrome"},
+                        "app": {"type": "STRING", "description": "Natural application name requested by the user"},
                         "name": {"type": "STRING", "description": "Alternative natural application name"},
                         "package": {"type": "STRING", "description": "Android package only when already known"},
                         "url": {"type": "STRING", "description": "URL for open_url"},
